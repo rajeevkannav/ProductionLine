@@ -86,7 +86,7 @@ jobs:
     needs: intake
     if: needs.intake.outputs.hitl_enabled == 'false' || contains(github.event.issue.labels.*.name, 'mogra:approved')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: write
       issues: write

@@ -11,31 +11,26 @@ HARNESS=$(jq -r '.harness' "$PLAN_JSON")
 MODEL=$(jq -r '.model' "$PLAN_JSON")
 BIN=$(jq -r '.bin' "$PLAN_JSON")
 ENV_KEY=$(jq -r '.envKey // empty' "$PLAN_JSON")
+RETRY_WAIT="${MOGRA_RETRY_WAIT:-65}"
 export PROMPT_FILE="/tmp/mogra-prompt-${ISSUE_NUMBER}.md"
 export MOGRA_MODEL="$MODEL"
 
 {
-  echo "# ProductionLine (mogra) Build Assignment — Issue #${ISSUE_NUMBER}"
-  echo "- Target Stack: \`${STACK}\`"
-  echo "- Goal: $(jq -r '.goal' "$PLAN_JSON")"
-  echo ""
+  echo "# ProductionLine (mogra) Task — Issue #${ISSUE_NUMBER} (${STACK})"
+  echo "Goal: $(jq -r '.goal' "$PLAN_JSON")"
   if [ -n "$ISSUE_FILE" ] && [ -f "$ISSUE_FILE" ]; then
-    echo "## GitHub Issue Specification"
-    cat "$ISSUE_FILE"
     echo ""
+    cat "$ISSUE_FILE"
   fi
-  echo "## Required ProductionLine Skills & Acceptance Contracts"
+  echo ""
+  echo "## Skills"
   jq -r '.skillPaths[]' "$PLAN_JSON" | while read -r skill_path; do
-    if [ -f "$skill_path" ]; then
-      cat "$skill_path"
-      echo ""
-    fi
+    [ -f "$skill_path" ] && sed '/^---$/,/^---$/d' "$skill_path"
   done
-  echo "## Execution Rules"
-  echo "- Build the '${STACK}' TodoMVC+ app inside '${SPOKE_DIR}/stacks/${STACK}'."
-  echo "- Include complete package.json scripts: typecheck, lint, test, build, and Playwright + @axe-core/playwright 320px reflow tests (test:e2e)."
-  echo "- Configure base path dynamically via process.env.VITE_BASE_PATH || '/'."
-  echo "- Never modify .github/workflows/, .mogra.yaml, or other stacks under stacks/."
+  echo "## Rules"
+  echo "- Build '${STACK}' inside '${SPOKE_DIR}/stacks/${STACK}' with scripts: typecheck, lint, test, build, test:e2e (Playwright + @axe-core/playwright 320px reflow)."
+  echo "- Dynamic base path via process.env.VITE_BASE_PATH || '/'."
+  echo "- Never edit .github/workflows/, .mogra.yaml, or other stacks/."
 } > "$PROMPT_FILE"
 
 if [ -n "$ENV_KEY" ] && [ -z "${!ENV_KEY:-}" ]; then
@@ -47,9 +42,7 @@ run_gemini_cli() {
   local target_model="${1:-}"
   export GEMINI_CLI_TRUST_WORKSPACE=true
   local args=(--yolo --skip-trust -p "$(cat "$PROMPT_FILE")")
-  if [ -n "$target_model" ]; then
-    args=(-m "$target_model" "${args[@]}")
-  fi
+  [ -n "$target_model" ] && args=(-m "$target_model" "${args[@]}")
   if command -v gemini >/dev/null 2>&1; then
     gemini "${args[@]}"
   else
@@ -58,21 +51,27 @@ run_gemini_cli() {
 }
 
 discover_flash_models() {
-  curl -fsS -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+  local all
+  all=$(curl -fsS -H "x-goog-api-key: ${GEMINI_API_KEY}" \
     "https://generativelanguage.googleapis.com/v1beta/models" \
     | jq -r '.models[] | select((.supportedGenerationMethods // []) | index("generateContent")) | .name | sub("^models/"; "")' \
     | grep -E 'flash' \
-    | grep -Ev '(image|tts|audio|live|thinking|robotics|computer-use|exp|omni)' \
-    | sort -r || true
+    | grep -Ev '(image|tts|audio|live|thinking|robotics|computer-use|exp|omni)' || true)
+
+  # Prioritize Free-Tier 500-RPD flash-lite models ahead of 20-RPD flash models.
+  {
+    printf '%s\n' "$all" | grep -E 'flash-lite' | grep -E '3\.1'
+    printf '%s\n' "$all" | grep -E 'flash-lite' | grep -v '3\.1' | sort -r
+    printf '%s\n' "$all" | grep -v 'flash-lite' | sort -r
+  } | awk '!seen[$0]++'
 }
 
 probe_gemini_model() {
-  local target_model="$1"
   curl -sS -o /dev/null -w "%{http_code}" \
     -H "x-goog-api-key: ${GEMINI_API_KEY}" \
     -H "Content-Type: application/json" \
     -d '{"contents":[{"parts":[{"text":"ok"}]}],"generationConfig":{"maxOutputTokens":1}}' \
-    "https://generativelanguage.googleapis.com/v1beta/models/${target_model}:generateContent" || echo "000"
+    "https://generativelanguage.googleapis.com/v1beta/models/${1}:generateContent" || echo "000"
 }
 
 mkdir -p "${SPOKE_DIR}/stacks/${STACK}"
@@ -82,7 +81,7 @@ cd "${SPOKE_DIR}/stacks/${STACK}"
 case "$HARNESS" in
   antigravity)
     python3 -m pip install --quiet --upgrade google-antigravity
-    if timeout 180s python3 -u -c "
+    if timeout 240s python3 -u -c "
 import asyncio, inspect, os, pathlib, sys
 from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig
 
@@ -108,23 +107,29 @@ asyncio.run(main())
       exit 0
     fi
 
-    echo "[mogra] antigravity failed or hit tier/capacity limit; discovering available Flash models for fallback." >&2
+    echo "[mogra] antigravity failed; discovering Free-Tier Flash-Lite models (retry wait=${RETRY_WAIT}s)." >&2
     mapfile -t FLASH_MODELS < <(discover_flash_models)
-    echo "[mogra] discovered Flash candidates: ${FLASH_MODELS[*]:-none}" >&2
+    echo "[mogra] candidates: ${FLASH_MODELS[*]:-none}" >&2
 
-    for candidate in "${FLASH_MODELS[@]}" ""; do
-      if [ -n "$candidate" ]; then
+    for attempt in 1 2; do
+      for candidate in "${FLASH_MODELS[@]}"; do
         http_code=$(probe_gemini_model "$candidate")
-        echo "[mogra] probe model='${candidate}' status=${http_code}" >&2
-        [ "$http_code" = "200" ] || continue
-      fi
-      echo "[mogra] running gemini-cli fallback model='${candidate:-default}'" >&2
-      if run_gemini_cli "$candidate"; then
-        exit 0
+        echo "[mogra] attempt=${attempt} probe model='${candidate}' status=${http_code}" >&2
+        if [ "$http_code" = "200" ]; then
+          if run_gemini_cli "$candidate"; then
+            exit 0
+          fi
+          echo "[mogra] cooling down ${RETRY_WAIT}s for RPM/TPM window reset..." >&2
+          sleep "$RETRY_WAIT"
+        fi
+      done
+      if [ "$attempt" -eq 1 ]; then
+        echo "[mogra] no healthy model yet; waiting ${RETRY_WAIT}s before retry pass..." >&2
+        sleep "$RETRY_WAIT"
       fi
     done
 
-    echo "[mogra] all Gemini models failed (check https://aistudio.google.com/rate-limit for Free Tier quota/503 status)." >&2
+    echo "[mogra] all Gemini Free-Tier candidates exhausted or unavailable." >&2
     exit 1
     ;;
   gemini-cli)

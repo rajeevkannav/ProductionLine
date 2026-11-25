@@ -29,13 +29,13 @@ export const SUPPORTED_STACKS = Object.freeze({
 export const HARNESSES = Object.freeze({
   antigravity: {
     bin: 'python3',
-    defaultModel: 'gemini-3.1-pro-preview',
+    defaultModel: 'gemini-3.1-flash-lite',
     envKey: 'GEMINI_API_KEY',
     buildArgs: ({ model, promptFile }) => ['-m', 'google.antigravity.cli', '--model', model, '--prompt-file', promptFile],
   },
   'gemini-cli': {
     bin: 'gemini',
-    defaultModel: 'gemini-3.1-pro-preview',
+    defaultModel: 'gemini-3.1-flash-lite',
     envKey: 'GEMINI_API_KEY',
     buildArgs: ({ model, prompt }) => ['-m', model, '-p', prompt],
   },
@@ -95,7 +95,7 @@ export const CONVENTIONS = Object.freeze({
   },
   runtime: {
     harness: 'antigravity',
-    model: 'gemini-3.1-pro-preview',
+    model: 'gemini-3.1-flash-lite',
     sandbox: 'worktree',
   },
   agents: {},

@@ -25,8 +25,8 @@ flowchart TD
 
 | Harness ID | Runner / Tool | Default Model | Required Secret Env Var | Best Used For |
 | :--- | :--- | :--- | :--- | :--- |
-| **`antigravity`** *(default)* | `google-antigravity` Python SDK | `gemini-3.1-pro-preview` | `GEMINI_API_KEY` | Default Google Antigravity autonomous SDLC runs |
-| **`gemini-cli`** | `gemini` CLI | `gemini-3.1-pro-preview` | `GEMINI_API_KEY` | Lightweight terminal headless execution |
+| **`antigravity`** *(default)* | `google-antigravity` Python SDK | `gemini-3.1-flash-lite` | `GEMINI_API_KEY` | Default Google Antigravity Free-Tier-ready autonomous runs |
+| **`gemini-cli`** | `gemini` CLI | `gemini-3.1-flash-lite` | `GEMINI_API_KEY` | Lightweight terminal headless execution |
 | **`claude-code`** | `claude` CLI | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` | Opt-in Anthropic reasoning/coding or cross-model review |
 | **`codex`** | `codex` CLI | `gpt-5-codex` | `OPENAI_API_KEY` | Opt-in OpenAI Codex execution |
 | **`goose`** | Block `goose` CLI | `gemini-2.5-pro` | `GEMINI_API_KEY` | MCP-native extensible local/CI workflows |
@@ -43,7 +43,7 @@ flowchart TD
 version: 1
 runtime:
   harness: antigravity
-  model: gemini-3.1-pro-preview
+  model: gemini-3.1-flash-lite
 ```
 
 ### Cross-Model Spoke Override (`.mogra.yaml`)
