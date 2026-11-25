@@ -44,13 +44,35 @@ if [ -n "$ENV_KEY" ] && [ -z "${!ENV_KEY:-}" ]; then
 fi
 
 run_gemini_cli() {
-  local target_model="$1"
+  local target_model="${1:-}"
   export GEMINI_CLI_TRUST_WORKSPACE=true
-  if command -v gemini >/dev/null 2>&1; then
-    gemini -m "$target_model" --yolo --skip-trust -p "$(cat "$PROMPT_FILE")"
-  else
-    npx -y @google/gemini-cli -m "$target_model" --yolo --skip-trust -p "$(cat "$PROMPT_FILE")"
+  local args=(--yolo --skip-trust -p "$(cat "$PROMPT_FILE")")
+  if [ -n "$target_model" ]; then
+    args=(-m "$target_model" "${args[@]}")
   fi
+  if command -v gemini >/dev/null 2>&1; then
+    gemini "${args[@]}"
+  else
+    npx -y @google/gemini-cli "${args[@]}"
+  fi
+}
+
+discover_flash_models() {
+  curl -fsS -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+    "https://generativelanguage.googleapis.com/v1beta/models" \
+    | jq -r '.models[] | select((.supportedGenerationMethods // []) | index("generateContent")) | .name | sub("^models/"; "")' \
+    | grep -E 'flash' \
+    | grep -Ev '(image|tts|audio|live|thinking|robotics|computer-use|exp)' \
+    | sort -r || true
+}
+
+probe_gemini_model() {
+  local target_model="$1"
+  curl -sS -o /dev/null -w "%{http_code}" \
+    -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d '{"contents":[{"parts":[{"text":"ok"}]}],"generationConfig":{"maxOutputTokens":1}}' \
+    "https://generativelanguage.googleapis.com/v1beta/models/${target_model}:generateContent" || echo "000"
 }
 
 mkdir -p "${SPOKE_DIR}/stacks/${STACK}"
@@ -60,7 +82,7 @@ cd "${SPOKE_DIR}/stacks/${STACK}"
 case "$HARNESS" in
   antigravity)
     python3 -m pip install --quiet --upgrade google-antigravity
-    if ! timeout 240s python3 -u -c "
+    if timeout 180s python3 -u -c "
 import asyncio, inspect, os, pathlib, sys
 from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig
 
@@ -83,9 +105,27 @@ async def main():
         print(flush=True)
 asyncio.run(main())
 "; then
-      echo "[mogra] antigravity failed or timed out; falling back to gemini-cli (gemini-3.8-flash)." >&2
-      run_gemini_cli "gemini-3.8-flash"
+      exit 0
     fi
+
+    echo "[mogra] antigravity failed or hit tier/capacity limit; discovering available Flash models for fallback." >&2
+    mapfile -t FLASH_MODELS < <(discover_flash_models)
+    echo "[mogra] discovered Flash candidates: ${FLASH_MODELS[*]:-none}" >&2
+
+    for candidate in "${FLASH_MODELS[@]}" ""; do
+      if [ -n "$candidate" ]; then
+        http_code=$(probe_gemini_model "$candidate")
+        echo "[mogra] probe model='${candidate}' status=${http_code}" >&2
+        [ "$http_code" = "200" ] || continue
+      fi
+      echo "[mogra] running gemini-cli fallback model='${candidate:-default}'" >&2
+      if run_gemini_cli "$candidate"; then
+        exit 0
+      fi
+    done
+
+    echo "[mogra] all Gemini models failed (check https://aistudio.google.com/rate-limit for Free Tier quota/503 status)." >&2
+    exit 1
     ;;
   gemini-cli)
     run_gemini_cli "$MODEL"
