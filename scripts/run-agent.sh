@@ -49,21 +49,34 @@ cd "${SPOKE_DIR}/stacks/${STACK}"
 case "$HARNESS" in
   antigravity)
     python3 -m pip install --quiet --upgrade google-antigravity
-    python3 -c "
-import asyncio, os, pathlib, sys
+    python3 -u -c "
+import asyncio, inspect, os, pathlib, sys
+import google.antigravity as agy
 from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig
 
 prompt = pathlib.Path(os.environ['PROMPT_FILE']).read_text()
+kwargs = dict(
+    system_instructions='You are ProductionLine (mogra) frontend-builder. Implement everything completely in the current working directory, run tests locally, and satisfy every attached skill.',
+    capabilities=CapabilitiesConfig(),
+)
+
+# Enable non-interactive headless tool execution when policies API is present
+try:
+    from google.antigravity.policies import policy
+    sig = inspect.signature(LocalAgentConfig)
+    if 'policies' in sig.parameters:
+        kwargs['policies'] = [policy.allow_all()]
+except Exception as exc:
+    print(f'[mogra] policy notice: {exc}', flush=True)
+
 async def main():
-    cfg = LocalAgentConfig(
-        system_instructions='You are ProductionLine (mogra) frontend-builder. Implement everything completely, run tests locally, and satisfy every attached skill.',
-        capabilities=CapabilitiesConfig(),
-    )
+    cfg = LocalAgentConfig(**kwargs)
     async with Agent(cfg) as agent:
         res = await agent.chat(prompt)
         async for token in res:
             sys.stdout.write(token)
-        print()
+            sys.stdout.flush()
+        print(flush=True)
 asyncio.run(main())
 "
     ;;
