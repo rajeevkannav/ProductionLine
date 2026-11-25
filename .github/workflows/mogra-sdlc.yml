@@ -300,22 +300,12 @@ jobs:
           done
 
           if [ -n "$LINKS" ]; then
-            cat > pages-dist/index.html <<HTML
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TodoMVC+ — ProductionLine (mogra) Showcase</title>
-</head>
-<body>
-  <main>
-    <h1>TodoMVC+ Showcase (ProductionLine / mogra)</h1>
-    <ul>${LINKS}</ul>
-  </main>
-</body>
-</html>
-HTML
+            printf '%s\n' \
+              '<!doctype html>' \
+              '<html lang="en">' \
+              '<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>TodoMVC+ — ProductionLine (mogra)</title></head>' \
+              "<body><main><h1>TodoMVC+ Showcase (ProductionLine / mogra)</h1><ul>${LINKS}</ul></main></body>" \
+              '</html>' > pages-dist/index.html
           fi
 
       - name: Upload Pages artifact
