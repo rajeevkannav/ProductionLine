@@ -83,8 +83,8 @@ async def main():
         print(flush=True)
 asyncio.run(main())
 "; then
-      echo "[mogra] antigravity timed out or hit provider error; falling back to gemini-cli (gemini-2.5-flash)." >&2
-      run_gemini_cli "gemini-2.5-flash"
+      echo "[mogra] antigravity failed or timed out; falling back to gemini-cli (gemini-3.8-flash)." >&2
+      run_gemini_cli "gemini-3.8-flash"
     fi
     ;;
   gemini-cli)
