@@ -1,0 +1,25 @@
+name: ProductionLine (mogra) Cross-Repo Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: "owner/repo subscribed to ProductionLine (mogra)"
+        required: true
+      event_type:
+        default: "mogra.trigger"
+      stack:
+        default: "react19-ts-vite"
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch to target mogra repository
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN }}
+        run: |
+          gh api "repos/${{ inputs.target_repo }}/dispatches" \
+            -f event_type="${{ inputs.event_type }}" \
+            -f "client_payload[stack]=${{ inputs.stack }}" \
+            -f "client_payload[source]=${{ github.repository }}"

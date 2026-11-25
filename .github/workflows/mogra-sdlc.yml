@@ -1,0 +1,266 @@
+name: ProductionLine (mogra) Autonomous SDLC
+
+on:
+  workflow_call:
+    inputs:
+      control_plane_repo:
+        type: string
+        default: "rajeevkannav/ProductionLine"
+      control_plane_ref:
+        type: string
+        default: "main"
+    secrets:
+      MOGRA_BOT_TOKEN:
+        required: false
+      GEMINI_API_KEY:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+
+# Least-privilege: each job declares only the exact permissions it requires.
+permissions: {}
+
+concurrency:
+  group: mogra-sdlc-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      stack: ${{ steps.route.outputs.stack }}
+      hitl_enabled: ${{ steps.route.outputs.hitl_enabled }}
+      harness: ${{ steps.route.outputs.harness }}
+      model: ${{ steps.route.outputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: spoke
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.control_plane_repo }}
+          ref: ${{ inputs.control_plane_ref }}
+          path: control-plane
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Route issue & update stack metadata
+        id: route
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          printf '%s' "$ISSUE_BODY" > /tmp/issue-body.md
+          LABELS=$(jq -r '[.issue.labels[].name] | join(",")' "$GITHUB_EVENT_PATH")
+          CFG=$(node control-plane/src/cli.mjs resolve-config --control-plane control-plane --spoke spoke)
+          RES=$(node control-plane/src/cli.mjs route-issue --control-plane control-plane --spoke spoke --title "$ISSUE_TITLE" --body-file /tmp/issue-body.md --labels "$LABELS")
+
+          STACK=$(printf '%s' "$RES" | jq -r '.stack')
+          NEW_TITLE=$(printf '%s' "$RES" | jq -r '.title')
+          printf '%s' "$RES" | jq -r '.body' > /tmp/updated-body.md
+
+          gh label create "stack:${STACK}" --color "0e8a16" --force || true
+          gh label create "mogra:active" --color "1d76db" --force || true
+          gh issue edit "$ISSUE_NUMBER" --title "$NEW_TITLE" --body-file /tmp/updated-body.md --add-label "stack:${STACK},mogra:active"
+
+          echo "stack=${STACK}" >> "$GITHUB_OUTPUT"
+          echo "hitl_enabled=$(printf '%s' "$CFG" | jq -r '.human_in_the_loop.enabled')" >> "$GITHUB_OUTPUT"
+          echo "harness=$(printf '%s' "$CFG" | jq -r '.runtime.harness')" >> "$GITHUB_OUTPUT"
+          echo "model=$(printf '%s' "$CFG" | jq -r '.runtime.model')" >> "$GITHUB_OUTPUT"
+
+  discover-spec-build:
+    needs: intake
+    if: needs.intake.outputs.hitl_enabled == 'false' || contains(github.event.issue.labels.*.name, 'mogra:approved')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      branch: ${{ steps.pr.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: spoke
+          token: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.control_plane_repo }}
+          ref: ${{ inputs.control_plane_ref }}
+          path: control-plane
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve agent plans & execute configured harness
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          STACK: ${{ needs.intake.outputs.stack }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          BRANCH="mogra/issue-${ISSUE_NUMBER}-${STACK}"
+          git -C spoke checkout -b "$BRANCH"
+          node control-plane/src/cli.mjs plan-agent --control-plane control-plane --spoke spoke --agent frontend-builder > /tmp/builder-plan.json
+          bash control-plane/scripts/run-agent.sh spoke /tmp/builder-plan.json "$ISSUE_NUMBER"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit & open PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          STACK: ${{ needs.intake.outputs.stack }}
+          BRANCH: ${{ steps.build.outputs.branch }}
+        run: |
+          cd spoke
+          git config user.name "mogra-bot[bot]"
+          git config user.email "mogra-bot@users.noreply.github.com"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "feat(${STACK}): implement TodoMVC+ for #${ISSUE_NUMBER}"
+            git push origin "$BRANCH"
+            PR_URL=$(gh pr create --title "feat(${STACK}): TodoMVC+ (#${ISSUE_NUMBER})" --body "Closes #${ISSUE_NUMBER}" --base main --head "$BRANCH")
+            PR_NUM=$(basename "$PR_URL")
+          else
+            PR_NUM=""
+          fi
+          echo "pr_number=${PR_NUM}" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+  verify-and-security:
+    needs: [intake, discover-spec-build]
+    if: needs.discover-spec-build.outputs.pr_number != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover-spec-build.outputs.branch }}
+          fetch-depth: 0
+          path: spoke
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.control_plane_repo }}
+          ref: ${{ inputs.control_plane_ref }}
+          path: control-plane
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enforce protected boundary (builders cannot alter workflows or .mogra.yaml)
+        run: |
+          cd spoke
+          git fetch origin main
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          if echo "$CHANGED" | grep -E '^(\.github/workflows/|\.mogra\.yaml)' ; then
+            echo "SECURITY VIOLATION: Automated PR attempted to modify protected CI or factory config files." >&2
+            exit 1
+          fi
+
+      - name: Secret scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: detect --source=spoke --no-git -v
+
+      - name: Independent build, test, Playwright a11y/reflow, audit & CycloneDX SBOM
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          PR_NUMBER: ${{ needs.discover-spec-build.outputs.pr_number }}
+        run: |
+          cd spoke
+          if [ -f package.json ]; then
+            npm ci
+            npm run typecheck --if-present
+            npm run lint --if-present
+            npm test --if-present
+            npm run build
+            npm audit --audit-level=high
+            npx @cyclonedx/cyclonedx-npm --output-file sbom.cdx.json
+          fi
+
+      - name: Upload SBOM artifact
+        if: hashFiles('spoke/sbom.cdx.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ needs.intake.outputs.stack }}
+          path: spoke/sbom.cdx.json
+
+  deploy-pages:
+    needs: [intake, discover-spec-build, verify-and-security]
+    if: needs.intake.outputs.hitl_enabled == 'false' && needs.discover-spec-build.outputs.pr_number != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover-spec-build.outputs.branch }}
+          token: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+
+      - name: Auto-merge verified PR
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          PR_NUMBER: ${{ needs.discover-spec-build.outputs.pr_number }}
+        run: gh pr merge "$PR_NUMBER" --squash --delete-branch
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build for GitHub Pages (dynamic base path)
+        if: hashFiles('package.json') != ''
+        env:
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+        run: |
+          npm ci
+          if [ -f public/CNAME ] || [ -f CNAME ]; then
+            export VITE_BASE_PATH="/"
+          fi
+          npm run build
+
+      - name: Upload Pages artifact
+        if: hashFiles('dist/index.html') != ''
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        if: hashFiles('dist/index.html') != ''
+        id: deployment
+        uses: actions/deploy-pages@v4
