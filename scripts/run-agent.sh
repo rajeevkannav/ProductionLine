@@ -12,6 +12,7 @@ MODEL=$(jq -r '.model' "$PLAN_JSON")
 BIN=$(jq -r '.bin' "$PLAN_JSON")
 ENV_KEY=$(jq -r '.envKey // empty' "$PLAN_JSON")
 export PROMPT_FILE="/tmp/mogra-prompt-${ISSUE_NUMBER}.md"
+export MOGRA_MODEL="$MODEL"
 
 {
   echo "# ProductionLine (mogra) Build Assignment — Issue #${ISSUE_NUMBER}"
@@ -42,6 +43,15 @@ if [ -n "$ENV_KEY" ] && [ -z "${!ENV_KEY:-}" ]; then
   exit 1
 fi
 
+run_gemini_cli() {
+  local target_model="$1"
+  if command -v gemini >/dev/null 2>&1; then
+    gemini -m "$target_model" --yolo -p "$(cat "$PROMPT_FILE")"
+  else
+    npx -y @google/gemini-cli -m "$target_model" --yolo -p "$(cat "$PROMPT_FILE")"
+  fi
+}
+
 mkdir -p "${SPOKE_DIR}/stacks/${STACK}"
 echo "Running harness=${HARNESS} model=${MODEL} stack=${STACK} workdir=${SPOKE_DIR}/stacks/${STACK}"
 cd "${SPOKE_DIR}/stacks/${STACK}"
@@ -49,9 +59,8 @@ cd "${SPOKE_DIR}/stacks/${STACK}"
 case "$HARNESS" in
   antigravity)
     python3 -m pip install --quiet --upgrade google-antigravity
-    python3 -u -c "
+    if ! timeout 240s python3 -u -c "
 import asyncio, inspect, os, pathlib, sys
-import google.antigravity as agy
 from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig
 
 prompt = pathlib.Path(os.environ['PROMPT_FILE']).read_text()
@@ -59,11 +68,11 @@ kwargs = dict(
     system_instructions='You are ProductionLine (mogra) frontend-builder. Implement everything completely in the current working directory, run tests locally, and satisfy every attached skill.',
     capabilities=CapabilitiesConfig(),
 )
-
-# Enable non-interactive headless tool execution when policies API is present
+sig = inspect.signature(LocalAgentConfig)
+if 'model' in sig.parameters:
+    kwargs['model'] = os.environ['MOGRA_MODEL']
 try:
     from google.antigravity.policies import policy
-    sig = inspect.signature(LocalAgentConfig)
     if 'policies' in sig.parameters:
         kwargs['policies'] = [policy.allow_all()]
 except Exception as exc:
@@ -78,14 +87,13 @@ async def main():
             sys.stdout.flush()
         print(flush=True)
 asyncio.run(main())
-"
+"; then
+      echo "[mogra] antigravity timed out or hit transient provider error; falling back to gemini-cli (gemini-2.5-flash)." >&2
+      run_gemini_cli "gemini-2.5-flash"
+    fi
     ;;
   gemini-cli)
-    if command -v gemini >/dev/null 2>&1; then
-      gemini -m "$MODEL" --yolo -p "$(cat "$PROMPT_FILE")"
-    else
-      npx -y @google/gemini-cli -m "$MODEL" --yolo -p "$(cat "$PROMPT_FILE")"
-    fi
+    run_gemini_cli "$MODEL"
     ;;
   claude-code|codex|goose|openhands|aider)
     if ! command -v "$BIN" >/dev/null 2>&1; then
