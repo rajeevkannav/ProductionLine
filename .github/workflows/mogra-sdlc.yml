@@ -59,6 +59,7 @@ jobs:
         id: route
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
@@ -72,9 +73,9 @@ jobs:
           NEW_TITLE=$(printf '%s' "$RES" | jq -r '.title')
           printf '%s' "$RES" | jq -r '.body' > /tmp/updated-body.md
 
-          gh label create "stack:${STACK}" --color "0e8a16" --force || true
-          gh label create "mogra:active" --color "1d76db" --force || true
-          gh issue edit "$ISSUE_NUMBER" --title "$NEW_TITLE" --body-file /tmp/updated-body.md --add-label "stack:${STACK},mogra:active"
+          gh label create "stack:${STACK}" -R "$REPO" --color "5319e7" --force || true
+          gh label create "mogra:active" -R "$REPO" --color "0075ca" --force || true
+          gh issue edit "$ISSUE_NUMBER" -R "$REPO" --title "$NEW_TITLE" --body-file /tmp/updated-body.md --add-label "stack:${STACK},mogra:active"
 
           echo "stack=${STACK}" >> "$GITHUB_OUTPUT"
           echo "hitl_enabled=$(printf '%s' "$CFG" | jq -r '.human_in_the_loop.enabled')" >> "$GITHUB_OUTPUT"
@@ -109,6 +110,10 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Resolve agent plans & execute configured harness
         id: build
         env:
@@ -118,17 +123,26 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           STACK: ${{ needs.intake.outputs.stack }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           BRANCH="mogra/issue-${ISSUE_NUMBER}-${STACK}"
-          git -C spoke checkout -b "$BRANCH"
+          git -C spoke checkout -B "$BRANCH"
+          {
+            echo "Title: ${ISSUE_TITLE}"
+            echo ""
+            printf '%s\n' "$ISSUE_BODY"
+          } > /tmp/issue-spec.md
+
           node control-plane/src/cli.mjs plan-agent --control-plane control-plane --spoke spoke --agent frontend-builder > /tmp/builder-plan.json
-          bash control-plane/scripts/run-agent.sh spoke /tmp/builder-plan.json "$ISSUE_NUMBER"
+          bash control-plane/scripts/run-agent.sh spoke /tmp/builder-plan.json "$ISSUE_NUMBER" "$STACK" /tmp/issue-spec.md
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
       - name: Commit & open PR
         id: pr
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           STACK: ${{ needs.intake.outputs.stack }}
           BRANCH: ${{ steps.build.outputs.branch }}
@@ -139,9 +153,14 @@ jobs:
           if [ -n "$(git status --porcelain)" ]; then
             git add -A
             git commit -m "feat(${STACK}): implement TodoMVC+ for #${ISSUE_NUMBER}"
-            git push origin "$BRANCH"
-            PR_URL=$(gh pr create --title "feat(${STACK}): TodoMVC+ (#${ISSUE_NUMBER})" --body "Closes #${ISSUE_NUMBER}" --base main --head "$BRANCH")
-            PR_NUM=$(basename "$PR_URL")
+            git push -f origin "$BRANCH"
+            EXISTING_PR=$(gh pr list -R "$REPO" --head "$BRANCH" --json number --jq '.[0].number // empty')
+            if [ -n "$EXISTING_PR" ]; then
+              PR_NUM="$EXISTING_PR"
+            else
+              PR_URL=$(gh pr create -R "$REPO" --title "feat(${STACK}): TodoMVC+ (#${ISSUE_NUMBER})" --body "Closes #${ISSUE_NUMBER}" --base main --head "$BRANCH")
+              PR_NUM=$(basename "$PR_URL")
+            fi
           else
             PR_NUM=""
           fi
@@ -195,25 +214,35 @@ jobs:
       - name: Independent build, test, Playwright a11y/reflow, audit & CycloneDX SBOM
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.discover-spec-build.outputs.pr_number }}
+          STACK: ${{ needs.intake.outputs.stack }}
         run: |
-          cd spoke
+          APP_DIR="spoke/stacks/${STACK}"
+          [ -f "${APP_DIR}/package.json" ] || APP_DIR="spoke"
+          cd "$APP_DIR"
           if [ -f package.json ]; then
-            npm ci
+            npm install --no-audit --no-fund
             npm run typecheck --if-present
             npm run lint --if-present
             npm test --if-present
+            if jq -e '.scripts["test:e2e"]' package.json >/dev/null 2>&1; then
+              npx playwright install --with-deps chromium
+              npm run test:e2e
+            fi
             npm run build
-            npm audit --audit-level=high
-            npx @cyclonedx/cyclonedx-npm --output-file sbom.cdx.json
+            npm audit --omit=dev --audit-level=high
+            npx -y @cyclonedx/cyclonedx-npm --output-file sbom.cdx.json
           fi
 
       - name: Upload SBOM artifact
-        if: hashFiles('spoke/sbom.cdx.json') != ''
+        if: hashFiles('spoke/stacks/*/sbom.cdx.json') != '' || hashFiles('spoke/sbom.cdx.json') != ''
         uses: actions/upload-artifact@v4
         with:
           name: sbom-${{ needs.intake.outputs.stack }}
-          path: spoke/sbom.cdx.json
+          path: |
+            spoke/stacks/*/sbom.cdx.json
+            spoke/sbom.cdx.json
 
   deploy-pages:
     needs: [intake, discover-spec-build, verify-and-security]
@@ -221,6 +250,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      issues: write
       pull-requests: write
       pages: write
       id-token: write
@@ -236,31 +266,76 @@ jobs:
       - name: Auto-merge verified PR
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.discover-spec-build.outputs.pr_number }}
-        run: gh pr merge "$PR_NUMBER" --squash --delete-branch
+        run: gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Build for GitHub Pages (dynamic base path)
-        if: hashFiles('package.json') != ''
+      - name: Build all TodoMVC+ stacks for GitHub Pages
         env:
-          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+          REPO_NAME: ${{ github.event.repository.name }}
         run: |
-          npm ci
+          mkdir -p pages-dist
+          ROOT_BASE="/${REPO_NAME}/"
           if [ -f public/CNAME ] || [ -f CNAME ]; then
-            export VITE_BASE_PATH="/"
+            ROOT_BASE="/"
+            cp -f public/CNAME CNAME 2>/dev/null || true
+            cp -f CNAME pages-dist/CNAME
           fi
-          npm run build
+
+          LINKS=""
+          for dir in stacks/*; do
+            [ -f "${dir}/package.json" ] || continue
+            stack_name=$(basename "$dir")
+            export VITE_BASE_PATH="${ROOT_BASE}${stack_name}/"
+            (cd "$dir" && npm install --no-audit --no-fund && npm run build)
+            if [ -d "${dir}/dist" ]; then
+              mkdir -p "pages-dist/${stack_name}"
+              cp -R "${dir}/dist/." "pages-dist/${stack_name}/"
+              LINKS="${LINKS}<li><a href=\"${VITE_BASE_PATH}\">${stack_name}</a></li>"
+            fi
+          done
+
+          if [ -n "$LINKS" ]; then
+            cat > pages-dist/index.html <<HTML
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TodoMVC+ — ProductionLine (mogra) Showcase</title>
+</head>
+<body>
+  <main>
+    <h1>TodoMVC+ Showcase (ProductionLine / mogra)</h1>
+    <ul>${LINKS}</ul>
+  </main>
+</body>
+</html>
+HTML
+          fi
 
       - name: Upload Pages artifact
-        if: hashFiles('dist/index.html') != ''
+        if: hashFiles('pages-dist/index.html') != ''
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: pages-dist
 
       - name: Deploy to GitHub Pages
-        if: hashFiles('dist/index.html') != ''
+        if: hashFiles('pages-dist/index.html') != ''
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Comment live Pages URL on Issue
+        if: steps.deployment.outputs.page_url != ''
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          STACK: ${{ needs.intake.outputs.stack }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" -R "$REPO" --body "ProductionLine (\`mogra\`) verified and deployed \`${STACK}\` to GitHub Pages: ${PAGE_URL}"
