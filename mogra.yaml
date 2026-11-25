@@ -7,7 +7,7 @@ factory:
   codename: mogra
 
 runtime:
-  harness: antigravity # antigravity | gemini-cli | claude-code | codex | goose | openhands | aider
+  harness: gemini-cli # gemini-cli (Free Tier) | antigravity (Tier 1+) | claude-code | codex | goose | openhands | aider
   model: gemini-3.1-flash-lite
 
 outcome:

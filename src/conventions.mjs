@@ -94,7 +94,7 @@ export const CONVENTIONS = Object.freeze({
     },
   },
   runtime: {
-    harness: 'antigravity',
+    harness: 'gemini-cli',
     model: 'gemini-3.1-flash-lite',
     sandbox: 'worktree',
   },

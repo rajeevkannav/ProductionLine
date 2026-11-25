@@ -11,7 +11,7 @@ HARNESS=$(jq -r '.harness' "$PLAN_JSON")
 MODEL=$(jq -r '.model' "$PLAN_JSON")
 BIN=$(jq -r '.bin' "$PLAN_JSON")
 ENV_KEY=$(jq -r '.envKey // empty' "$PLAN_JSON")
-RETRY_WAIT="${MOGRA_RETRY_WAIT:-65}"
+RETRY_WAIT="${MOGRA_RETRY_WAIT:-70}"
 export PROMPT_FILE="/tmp/mogra-prompt-${ISSUE_NUMBER}.md"
 export MOGRA_MODEL="$MODEL"
 
@@ -58,12 +58,12 @@ discover_flash_models() {
     | grep -E 'flash' \
     | grep -Ev '(image|tts|audio|live|thinking|robotics|computer-use|exp|omni)' || true)
 
-  # Prioritize Free-Tier 500-RPD flash-lite models ahead of 20-RPD flash models.
   {
+    printf '%s\n' "$MODEL"
     printf '%s\n' "$all" | grep -E 'flash-lite' | grep -E '3\.1'
     printf '%s\n' "$all" | grep -E 'flash-lite' | grep -v '3\.1' | sort -r
     printf '%s\n' "$all" | grep -v 'flash-lite' | sort -r
-  } | awk '!seen[$0]++'
+  } | awk 'NF && !seen[$0]++'
 }
 
 probe_gemini_model() {
@@ -74,14 +74,49 @@ probe_gemini_model() {
     "https://generativelanguage.googleapis.com/v1beta/models/${1}:generateContent" || echo "000"
 }
 
+run_free_tier_gemini_loop() {
+  mapfile -t FLASH_MODELS < <(discover_flash_models)
+  echo "[mogra] Free-Tier candidates (cooldown=${RETRY_WAIT}s): ${FLASH_MODELS[*]:-none}" >&2
+
+  for candidate in "${FLASH_MODELS[@]}"; do
+    for attempt in 1 2; do
+      http_code=$(probe_gemini_model "$candidate")
+      echo "[mogra] model='${candidate}' attempt=${attempt} probe=${http_code}" >&2
+      if [ "$http_code" != "200" ]; then
+        if [ "$attempt" -eq 1 ] && { [ "$http_code" = "429" ] || [ "$http_code" = "503" ]; }; then
+          sleep "$RETRY_WAIT"
+          continue
+        fi
+        break
+      fi
+      if [ "$attempt" -eq 2 ]; then
+        printf '\n## Resume Note\nInspect any files already written in the working directory and complete only remaining files/tests.\n' >> "$PROMPT_FILE"
+      fi
+      if run_gemini_cli "$candidate"; then
+        return 0
+      fi
+      echo "[mogra] cooling down ${RETRY_WAIT}s before retrying '${candidate}'..." >&2
+      sleep "$RETRY_WAIT"
+    done
+  done
+  return 1
+}
+
 mkdir -p "${SPOKE_DIR}/stacks/${STACK}"
 echo "Running harness=${HARNESS} model=${MODEL} stack=${STACK} workdir=${SPOKE_DIR}/stacks/${STACK}"
 cd "${SPOKE_DIR}/stacks/${STACK}"
 
 case "$HARNESS" in
   antigravity)
+    # Free-tier 250K TPM cannot accommodate antigravity's full localharness prompt overhead;
+    # route *-flash-lite directly through gemini-cli unless paid tier is used.
+    if [[ "$MODEL" == *flash-lite* ]]; then
+      echo "[mogra] Free-Tier Flash-Lite model detected; running lean gemini-cli directly to stay under 250K TPM." >&2
+      run_free_tier_gemini_loop && exit 0
+      exit 1
+    fi
     python3 -m pip install --quiet --upgrade google-antigravity
-    if timeout 60s python3 -u -c "
+    if timeout 120s python3 -u -c "
 import asyncio, inspect, os, pathlib, sys
 from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig
 
@@ -106,35 +141,12 @@ asyncio.run(main())
 "; then
       exit 0
     fi
-
-    echo "[mogra] antigravity failed; discovering Free-Tier Flash-Lite models (retry wait=${RETRY_WAIT}s)." >&2
-    mapfile -t FLASH_MODELS < <(discover_flash_models)
-    echo "[mogra] candidates: ${FLASH_MODELS[*]:-none}" >&2
-
-    for candidate in "${FLASH_MODELS[@]}"; do
-      for attempt in 1 2; do
-        http_code=$(probe_gemini_model "$candidate")
-        echo "[mogra] model='${candidate}' attempt=${attempt} probe=${http_code}" >&2
-        if [ "$http_code" != "200" ]; then
-          [ "$attempt" -eq 1 ] && [ "$http_code" = "429" ] && { sleep "$RETRY_WAIT"; continue; }
-          break
-        fi
-        if [ "$attempt" -eq 2 ]; then
-          printf '\n## Resume Note\nInspect any files already written in the working directory and complete only remaining files/tests.\n' >> "$PROMPT_FILE"
-        fi
-        if run_gemini_cli "$candidate"; then
-          exit 0
-        fi
-        echo "[mogra] cooling down ${RETRY_WAIT}s before retrying '${candidate}'..." >&2
-        sleep "$RETRY_WAIT"
-      done
-    done
-
-    echo "[mogra] all Gemini Free-Tier candidates exhausted or unavailable." >&2
+    run_free_tier_gemini_loop && exit 0
     exit 1
     ;;
   gemini-cli)
-    run_gemini_cli "$MODEL"
+    run_free_tier_gemini_loop && exit 0
+    exit 1
     ;;
   claude-code|codex|goose|openhands|aider)
     if ! command -v "$BIN" >/dev/null 2>&1; then

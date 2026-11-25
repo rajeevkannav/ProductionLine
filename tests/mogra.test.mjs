@@ -15,7 +15,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 test('loads convention-first defaults with HITL disabled, security gates on, and 5 stacks', () => {
   const cfg = loadConfig({ controlPlaneDir: ROOT });
   assert.equal(cfg.human_in_the_loop.enabled, false);
-  assert.equal(cfg.runtime.harness, 'antigravity');
+  assert.equal(cfg.runtime.harness, 'gemini-cli');
   assert.equal(cfg.outcome.stack, 'react19-ts-vite');
   assert.equal(cfg.gates.protected_paths_enforced, true);
   assert.equal(cfg.gates.secret_scan_required, true);
