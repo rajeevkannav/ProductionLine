@@ -95,7 +95,7 @@ test('evidence ledger preserves factual pass/fail/not-run states', () => {
   const md = formatEvidenceLedger({
     stack: 'react19-ts-vite',
     harness: 'antigravity',
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3.1-pro-preview',
     checks: [
       { name: '320px Reflow', passed: true, command: 'npx playwright test', detail: 'scrollWidth 320 <= 320' },
       { name: 'SBOM', passed: null, command: '', detail: 'Pending' },

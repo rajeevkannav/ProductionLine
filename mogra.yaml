@@ -8,7 +8,7 @@ factory:
 
 runtime:
   harness: antigravity # antigravity | gemini-cli | claude-code | codex | goose | openhands | aider
-  model: gemini-2.5-pro
+  model: gemini-3.1-pro-preview
 
 outcome:
   blueprint: todomvc-plus

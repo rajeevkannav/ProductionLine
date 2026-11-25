@@ -37,7 +37,7 @@ Zero-config defaults live in [`src/conventions.mjs`](src/conventions.mjs). Spoke
 
 | Concern | Convention Default | Override Key |
 | :--- | :--- | :--- |
-| **Harness & Model** | `antigravity` / `gemini-2.5-pro` | `runtime.harness`, `runtime.model`, `agents.<name>` |
+| **Harness & Model** | `antigravity` / `gemini-3.1-pro-preview` | `runtime.harness`, `runtime.model`, `agents.<name>` |
 | **Human-in-the-Loop** | `false` (autonomous end-to-end) | `human_in_the_loop.enabled` |
 | **Outcome & Stacks** | `todomvc-plus` (`react19-ts-vite`, `vue3-ts-vite`, `svelte5-ts-vite`, `angular-ts`, `solid-ts-vite`) | `outcome.blueprint`, `outcome.stack` |
 | **Verification Gates** | Independent verifier, 320px reflow, WCAG 2.2 AA zero violations, Gitleaks, SBOM, Evidence Ledger | `gates.*` |

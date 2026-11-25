@@ -45,10 +45,11 @@ fi
 
 run_gemini_cli() {
   local target_model="$1"
+  export GEMINI_CLI_TRUST_WORKSPACE=true
   if command -v gemini >/dev/null 2>&1; then
-    gemini -m "$target_model" --yolo -p "$(cat "$PROMPT_FILE")"
+    gemini -m "$target_model" --yolo --skip-trust -p "$(cat "$PROMPT_FILE")"
   else
-    npx -y @google/gemini-cli -m "$target_model" --yolo -p "$(cat "$PROMPT_FILE")"
+    npx -y @google/gemini-cli -m "$target_model" --yolo --skip-trust -p "$(cat "$PROMPT_FILE")"
   fi
 }
 
@@ -71,12 +72,6 @@ kwargs = dict(
 sig = inspect.signature(LocalAgentConfig)
 if 'model' in sig.parameters:
     kwargs['model'] = os.environ['MOGRA_MODEL']
-try:
-    from google.antigravity.policies import policy
-    if 'policies' in sig.parameters:
-        kwargs['policies'] = [policy.allow_all()]
-except Exception as exc:
-    print(f'[mogra] policy notice: {exc}', flush=True)
 
 async def main():
     cfg = LocalAgentConfig(**kwargs)
@@ -88,7 +83,7 @@ async def main():
         print(flush=True)
 asyncio.run(main())
 "; then
-      echo "[mogra] antigravity timed out or hit transient provider error; falling back to gemini-cli (gemini-2.5-flash)." >&2
+      echo "[mogra] antigravity timed out or hit provider error; falling back to gemini-cli (gemini-2.5-flash)." >&2
       run_gemini_cli "gemini-2.5-flash"
     fi
     ;;
