@@ -128,15 +128,24 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           BRANCH="mogra/issue-${ISSUE_NUMBER}-${STACK}"
-          git -C spoke checkout -B "$BRANCH"
+          if git -C spoke ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git -C spoke fetch origin "$BRANCH"
+            git -C spoke checkout -B "$BRANCH" "origin/$BRANCH"
+          else
+            git -C spoke checkout -B "$BRANCH"
+          fi
           {
             echo "Title: ${ISSUE_TITLE}"
             echo ""
             printf '%s\n' "$ISSUE_BODY"
           } > /tmp/issue-spec.md
 
-          node control-plane/src/cli.mjs plan-agent --control-plane control-plane --spoke spoke --agent frontend-builder > /tmp/builder-plan.json
-          bash control-plane/scripts/run-agent.sh spoke /tmp/builder-plan.json "$ISSUE_NUMBER" "$STACK" /tmp/issue-spec.md
+          if [ -f "spoke/stacks/${STACK}/package.json" ]; then
+            echo "[mogra] Existing implementation found on ${BRANCH}; skipping LLM generation and proceeding to verification."
+          else
+            node control-plane/src/cli.mjs plan-agent --control-plane control-plane --spoke spoke --agent frontend-builder > /tmp/builder-plan.json
+            bash control-plane/scripts/run-agent.sh spoke /tmp/builder-plan.json "$ISSUE_NUMBER" "$STACK" /tmp/issue-spec.md
+          fi
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
       - name: Commit & open PR
@@ -156,6 +165,9 @@ jobs:
             git add -A
             git commit -m "feat(${STACK}): implement TodoMVC+ for #${ISSUE_NUMBER}"
             git push -f origin "$BRANCH"
+          fi
+          git fetch origin main --depth=1 || true
+          if [ "$(git rev-list --count origin/main.."$BRANCH" 2>/dev/null || echo 0)" -gt 0 ]; then
             EXISTING_PR=$(gh pr list -R "$REPO" --head "$BRANCH" --json number --jq '.[0].number // empty')
             if [ -n "$EXISTING_PR" ]; then
               PR_NUM="$EXISTING_PR"
