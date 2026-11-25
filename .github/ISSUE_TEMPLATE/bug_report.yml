@@ -1,0 +1,17 @@
+name: Bug Report
+description: Report a bug in ProductionLine (mogra) CLI, workflows, skills, or harness runner.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Share the failing command, workflow run URL, and observed output.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true

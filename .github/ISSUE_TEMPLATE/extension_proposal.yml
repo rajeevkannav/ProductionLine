@@ -1,0 +1,20 @@
+name: New Skill / Harness / Stack Proposal
+description: Propose a reusable skill, AI harness adapter, or stack blueprint for ProductionLine (mogra).
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Extension Type
+      options:
+        - Skill (skills/*/SKILL.md)
+        - Harness / Model Adapter
+        - Stack / Blueprint (Frontend or Backend)
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Proposed Contract & Verification Gate
+    validations:
+      required: true

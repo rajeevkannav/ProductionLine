@@ -19,9 +19,39 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm run validate
-      - run: npm test
-      - run: bash -n scripts/run-agent.sh
+
+      - name: Validate config, unit tests, and shell scripts
+        run: npm run check
+
+      - name: Validate all YAML workflows, registries, and issue templates
+        run: |
+          ruby -ryaml -e 'Dir.glob("{.github/**/*.yml,templates/**/*.yml,agents/*.yaml,mogra.yaml}").each { |f| YAML.load_file(f) }'
+
+      - name: Verify every skill referenced in agents/registry.yaml exists
+        run: |
+          node -e '
+            import("./src/yaml-lite.mjs").then(({ parseYaml }) => {
+              import("node:fs").then((fs) => {
+                const reg = parseYaml(fs.readFileSync("agents/registry.yaml", "utf8"));
+                for (const [name, def] of Object.entries(reg.agents)) {
+                  for (const s of def.skills) {
+                    const p = `skills/${s}/SKILL.md`;
+                    if (!fs.existsSync(p)) throw new Error(`Agent ${name} references missing skill ${p}`);
+                  }
+                }
+                console.log("All agent skill references verified.");
+              });
+            });
+          '
+
+      - name: Secret scan (Gitleaks CLI)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R gitleaks/gitleaks -p '*linux_x64.tar.gz' -O /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks detect --source=. --no-git --exit-code 1 -v

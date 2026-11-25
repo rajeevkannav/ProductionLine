@@ -3,10 +3,28 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "ProductionLine (codename: mogra) — Configurable, convention-first OSS software factory.",
+  "license": "MIT",
+  "description": "ProductionLine (codename: mogra) — Convention-first, security-hardened OSS Software Factory driven by GitHub Issues.",
+  "homepage": "https://github.com/rajeevkannav/ProductionLine#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rajeevkannav/ProductionLine.git"
+  },
+  "keywords": [
+    "software-factory",
+    "ai-agents",
+    "github-actions",
+    "devsecops",
+    "sdlc",
+    "accessibility",
+    "wcag",
+    "playwright",
+    "mcp"
+  ],
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "validate": "node src/cli.mjs validate"
+    "validate": "node src/cli.mjs validate",
+    "check": "npm run validate && npm test && bash -n scripts/run-agent.sh"
   },
   "engines": {
     "node": ">=22.0.0"
