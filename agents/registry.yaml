@@ -1,0 +1,33 @@
+# ProductionLine (mogra) Agents — Convention over Configuration
+# Any omitted harness/model inherits runtime.harness and runtime.model.
+
+agents:
+  discovery-ideator:
+    stage: discovery
+    goal: Convert an open GitHub Issue into clear user outcomes, edge cases, and TodoMVC+ UX differentiators.
+    skills: [issue-stack-router, wcag-reflow-a11y, ultra-modern-web-css]
+
+  triage-architect:
+    stage: spec
+    goal: Lock stack selection, update the GitHub Issue with the stack name, and publish a concrete architecture & acceptance spec.
+    skills: [issue-stack-router, wcag-reflow-a11y, ultra-modern-web-css, local-first-resilience, security-hardening]
+
+  frontend-builder:
+    stage: build
+    goal: Implement the complete TodoMVC+ outcome in an isolated worktree satisfying all accessibility, reflow, security, and modern web standards.
+    skills: [wcag-reflow-a11y, ultra-modern-web-css, local-first-resilience, security-hardening]
+
+  qa-reflow-verifier:
+    stage: verify
+    goal: Independently run unit, keyboard E2E, 320px/400% reflow, axe-core WCAG 2.2 AA, and cross-tab sync verification.
+    skills: [playwright-a11y-reflow-gate, evidence-first-reporting]
+
+  security-auditor:
+    stage: security
+    goal: Enforce protected-path boundaries, secret scanning, SAST, dependency audit, and CycloneDX SBOM generation before merge.
+    skills: [security-hardening, evidence-first-reporting]
+
+  pr-curator:
+    stage: review-merge
+    goal: Attach a factual Evidence Ledger to the PR, update the GitHub Issue, and trigger GitHub Pages / cross-repo release.
+    skills: [evidence-first-reporting, issue-stack-router]
