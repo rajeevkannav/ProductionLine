@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SPOKE_DIR="${1:?spoke dir required}"
+SPOKE_DIR=$(cd "${1:?spoke dir required}" && pwd)
 PLAN_JSON="${2:?plan json required}"
 ISSUE_NUMBER="${3:?issue number required}"
 STACK="${4:-react19-ts-vite}"
@@ -74,6 +74,17 @@ probe_gemini_model() {
     "https://generativelanguage.googleapis.com/v1beta/models/${1}:generateContent" || echo "000"
 }
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+CONTROL_PLANE_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
+
+run_free_tier_oneshot() {
+  local target_model="$1"
+  node "${CONTROL_PLANE_DIR}/src/free-tier-builder.mjs" \
+    --workdir "." \
+    --model "$target_model" \
+    --prompt-file "$PROMPT_FILE"
+}
+
 run_free_tier_gemini_loop() {
   mapfile -t FLASH_MODELS < <(discover_flash_models)
   echo "[mogra] Free-Tier candidates (cooldown=${RETRY_WAIT}s): ${FLASH_MODELS[*]:-none}" >&2
@@ -89,10 +100,7 @@ run_free_tier_gemini_loop() {
         fi
         break
       fi
-      if [ "$attempt" -eq 2 ]; then
-        printf '\n## Resume Note\nInspect any files already written in the working directory and complete only remaining files/tests.\n' >> "$PROMPT_FILE"
-      fi
-      if run_gemini_cli "$candidate"; then
+      if run_free_tier_oneshot "$candidate"; then
         return 0
       fi
       echo "[mogra] cooling down ${RETRY_WAIT}s before retrying '${candidate}'..." >&2

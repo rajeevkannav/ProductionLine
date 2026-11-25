@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config.mjs';
 import { SUPPORTED_STACKS } from '../src/conventions.mjs';
 import { formatEvidenceLedger } from '../src/evidence.mjs';
+import { writeGeneratedFiles } from '../src/free-tier-builder.mjs';
 import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
 
@@ -103,4 +104,16 @@ test('evidence ledger preserves factual pass/fail/not-run states', () => {
   });
   assert.match(md, /\| 320px Reflow \| PASS \|/);
   assert.match(md, /\| SBOM \| NOT RUN \|/);
+});
+
+test('free-tier builder blocks path traversal and protected workflow paths', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mogra-gen-'));
+  try {
+    const written = writeGeneratedFiles(dir, { 'src/App.tsx': 'export default function App() {}' });
+    assert.deepEqual(written, ['src/App.tsx']);
+    assert.throws(() => writeGeneratedFiles(dir, { '../evil.js': 'bad' }), /path traversal/);
+    assert.throws(() => writeGeneratedFiles(dir, { '.github/workflows/ci.yml': 'bad' }), /forbidden generated path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
