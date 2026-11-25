@@ -81,7 +81,7 @@ cd "${SPOKE_DIR}/stacks/${STACK}"
 case "$HARNESS" in
   antigravity)
     python3 -m pip install --quiet --upgrade google-antigravity
-    if timeout 240s python3 -u -c "
+    if timeout 60s python3 -u -c "
 import asyncio, inspect, os, pathlib, sys
 from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig
 
@@ -111,22 +111,23 @@ asyncio.run(main())
     mapfile -t FLASH_MODELS < <(discover_flash_models)
     echo "[mogra] candidates: ${FLASH_MODELS[*]:-none}" >&2
 
-    for attempt in 1 2; do
-      for candidate in "${FLASH_MODELS[@]}"; do
+    for candidate in "${FLASH_MODELS[@]}"; do
+      for attempt in 1 2; do
         http_code=$(probe_gemini_model "$candidate")
-        echo "[mogra] attempt=${attempt} probe model='${candidate}' status=${http_code}" >&2
-        if [ "$http_code" = "200" ]; then
-          if run_gemini_cli "$candidate"; then
-            exit 0
-          fi
-          echo "[mogra] cooling down ${RETRY_WAIT}s for RPM/TPM window reset..." >&2
-          sleep "$RETRY_WAIT"
+        echo "[mogra] model='${candidate}' attempt=${attempt} probe=${http_code}" >&2
+        if [ "$http_code" != "200" ]; then
+          [ "$attempt" -eq 1 ] && [ "$http_code" = "429" ] && { sleep "$RETRY_WAIT"; continue; }
+          break
         fi
-      done
-      if [ "$attempt" -eq 1 ]; then
-        echo "[mogra] no healthy model yet; waiting ${RETRY_WAIT}s before retry pass..." >&2
+        if [ "$attempt" -eq 2 ]; then
+          printf '\n## Resume Note\nInspect any files already written in the working directory and complete only remaining files/tests.\n' >> "$PROMPT_FILE"
+        fi
+        if run_gemini_cli "$candidate"; then
+          exit 0
+        fi
+        echo "[mogra] cooling down ${RETRY_WAIT}s before retrying '${candidate}'..." >&2
         sleep "$RETRY_WAIT"
-      fi
+      done
     done
 
     echo "[mogra] all Gemini Free-Tier candidates exhausted or unavailable." >&2
