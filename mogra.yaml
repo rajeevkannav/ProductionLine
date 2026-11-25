@@ -1,0 +1,18 @@
+# ProductionLine (codename: mogra) — Minimal Convention-First Config
+# Omitted fields inherit defaults from src/conventions.mjs.
+
+version: 1
+factory:
+  name: ProductionLine
+  codename: mogra
+
+runtime:
+  harness: antigravity # antigravity | gemini-cli | claude-code | codex | goose | openhands | aider
+  model: gemini-2.5-pro
+
+outcome:
+  blueprint: todomvc-plus
+  stack: react19-ts-vite
+
+human_in_the_loop:
+  enabled: false

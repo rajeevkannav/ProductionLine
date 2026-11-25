@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProductionLine (mogra) Configuration",
+  "type": "object",
+  "required": ["version"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "factory": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "codename": { "type": "string" },
+        "control_plane_repo": { "type": "string" }
+      }
+    },
+    "human_in_the_loop": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "checkpoints": {
+          "type": "object",
+          "properties": {
+            "discovery_approval": { "type": "boolean" },
+            "spec_approval": { "type": "boolean" },
+            "pr_review_required": { "type": "boolean" },
+            "release_approval": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "harness": {
+          "type": "string",
+          "enum": ["antigravity", "gemini-cli", "claude-code", "codex", "goose", "openhands", "aider"]
+        },
+        "model": { "type": "string" },
+        "sandbox": { "type": "string", "enum": ["worktree", "docker", "github-runner"] }
+      }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "harness": {
+            "type": "string",
+            "enum": ["antigravity", "gemini-cli", "claude-code", "codex", "goose", "openhands", "aider", "deterministic-ci"]
+          },
+          "model": { "type": "string" }
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "properties": {
+        "blueprint": { "type": "string" },
+        "stack": {
+          "type": "string",
+          "enum": ["react19-ts-vite", "vue3-ts-vite", "svelte5-ts-vite", "angular-ts", "solid-ts-vite"]
+        }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "properties": {
+        "target": { "type": "string", "enum": ["github-pages", "none"] },
+        "custom_domain": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "productionline-mogra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ProductionLine (codename: mogra) — Configurable, convention-first OSS software factory.",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "validate": "node src/cli.mjs validate"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
