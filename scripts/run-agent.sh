@@ -62,7 +62,7 @@ discover_flash_models() {
     "https://generativelanguage.googleapis.com/v1beta/models" \
     | jq -r '.models[] | select((.supportedGenerationMethods // []) | index("generateContent")) | .name | sub("^models/"; "")' \
     | grep -E 'flash' \
-    | grep -Ev '(image|tts|audio|live|thinking|robotics|computer-use|exp)' \
+    | grep -Ev '(image|tts|audio|live|thinking|robotics|computer-use|exp|omni)' \
     | sort -r || true
 }
 
