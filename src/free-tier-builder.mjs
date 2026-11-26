@@ -100,6 +100,16 @@ function runLocalChecks(workdir) {
       'npm install --no-audit --no-fund && npm run typecheck --if-present && npm run lint --if-present && npm test --if-present && npm run build',
       { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 },
     );
+    const pwCfgPath = join(workdir, 'playwright.config.ts');
+    if (existsSync(pwCfgPath)) {
+      const pwCfg = readFileSync(pwCfgPath, 'utf8');
+      if (pwCfg.includes('127.0.0.1') && !pwCfg.includes('--host 127.0.0.1') && !pwCfg.includes('--host=127.0.0.1')) {
+        return {
+          ok: false,
+          output: 'playwright.config.ts webServer.url uses 127.0.0.1, so webServer.command MUST pass `--host 127.0.0.1` (otherwise Vite binds IPv6 ::1 on Linux CI and Playwright times out).',
+        };
+      }
+    }
     return { ok: true, output: '' };
   } catch (err) {
     const combined = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim();
@@ -136,19 +146,22 @@ async function main() {
       '',
       '## Output Format (STRICT JSON)',
       'Return ONLY a JSON object with shape: { "files": { "<relative-path>": "<full-file-content>" } }.',
+      'Build a COMPLETE, polished, production-quality application — NO minimal toy stubs. Include ALL requested features:',
+      '1. Full TodoMVC CRUD: add todo (trimmed non-empty), toggle single & toggle-all, inline edit (Enter/Blur saves, Escape cancels, empty deletes), delete todo, Clear Completed, live remaining count, All/Active/Completed filters.',
+      '2. TodoMVC+ Power Features: versioned IndexedDB persistence with localStorage fallback (for jsdom), BroadcastChannel multi-tab sync (feature-detected), Undo/Redo history (buttons + Ctrl+Z / Ctrl+Shift+Z), prototype-pollution-safe validated JSON Export/Import, and accessible Light/Dark theme toggle.',
+      '3. Accessibility & Ultra-Modern CSS: OKLCH + light-dark() design tokens, @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast, visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support.',
+      '',
       'REQUIRED files checklist:',
-      '- package.json (scripts: typecheck, lint, test, build, test:e2e)',
-      '- tsconfig.json',
+      '- package.json (scripts: dev, typecheck: "tsc --noEmit", lint: "tsc --noEmit" or eslint v9 flat config, test: "vitest run", build: "tsc --noEmit && vite build", test:e2e: "playwright test")',
+      '- tsconfig.json (MUST have "noEmit": true so tsc never emits .js files into src/ or e2e/)',
       '- vite.config.ts (with base: process.env.VITE_BASE_PATH || "/")',
       '- vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"])',
-      '- playwright.config.ts (testDir:"./e2e", webServer command:"npm run dev -- --port 4173 --strictPort", url:"http://127.0.0.1:4173", use.baseURL:"http://127.0.0.1:4173")',
+      '- playwright.config.ts (testDir:"./e2e", timeout: 120000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" (or "--host 127.0.0.1 --port 4173" for Angular), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env.CI, timeout: 120000 }, use: { baseURL: "http://127.0.0.1:4173" })',
       '- index.html',
-      '- src/* application source files & clean modern CSS (prefer native CSS variables/layers without postcss.config.js)',
-      '- AT LEAST ONE real unit test file under src/ (e.g. src/App.test.tsx or src/todo.test.ts) using vitest',
-      '- e2e/todomvc.spec.ts (Playwright + @axe-core/playwright + 320px reflow check)',
-      'For lint: use ESLint v9 flat config (eslint.config.mjs with eslint + @eslint/js + typescript-eslint, NEVER .eslintrc*) OR `"lint": "tsc --noEmit"`.',
-      'Ensure EVERY package imported in any config, src/*, or e2e/* (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is listed in package.json.',
-      'Keep code clean, accessible (WCAG 2.2 AA+, 320px zero-overflow reflow), and complete.',
+      '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies)',
+      '- Real unit tests under src/ (e.g. src/App.test.tsx) testing CRUD, filters, undo/redo, and safe JSON import',
+      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations)',
+      'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json.',
     ].join('\n');
 
     const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt });
