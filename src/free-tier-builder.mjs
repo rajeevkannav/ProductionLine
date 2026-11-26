@@ -219,7 +219,7 @@ async function main() {
       '- playwright.config.ts (testDir:"./e2e", timeout: 120000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" (or "--host 127.0.0.1 --port 4173" for Angular), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env.CI, timeout: 120000 }, use: { baseURL: "http://127.0.0.1:4173" })',
       '- index.html',
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
-      '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import using scoped/role queries that do not collide with `aria-live` announcer text)',
+      '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import; ALWAYS scope item presence/removal checks inside the list via `within(screen.getByRole(\'list\'))` and NEVER assert on or `waitForElementToBeRemoved` the `role="status"` live announcer)',
       '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — and pass `{ exact: true }` to EVERY `getByText(..., { exact: true })` AND `getByRole(..., { name: ..., exact: true })`)',
       'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json.',
     ].join('\n');
@@ -247,6 +247,9 @@ async function main() {
     }
     if (check.output.includes('Found multiple elements') || check.output.includes('getMultipleElementsFoundError')) {
       hints.push('CRITICAL: Testing Library leaked DOM between tests! Import `cleanup` from `@testing-library/react` and `afterEach` from `vitest` directly in `src/App.test.tsx` and call `afterEach(() => cleanup())`.');
+    }
+    if (check.output.includes('not.toBeInTheDocument') || check.output.includes('waitForElementToBeRemoved') || check.output.includes('role="status"')) {
+      hints.push('CRITICAL: Do NOT assert on or waitForElementToBeRemoved on `role="status"` (the live announcer element stays mounted!). Scope todo item checks inside the list using `within(screen.getByRole(\'list\')).queryByText(...)` instead of `screen.queryByText(...)`.');
     }
     if (check.output.includes('eslint')) {
       hints.push('If using ESLint v9+, use eslint.config.mjs (remove .eslintrc*), or simplify lint script cleanly.');
