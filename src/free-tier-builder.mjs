@@ -293,7 +293,7 @@ async function main() {
     if (check.output.includes('Found multiple elements') || check.output.includes('getMultipleElementsFoundError')) {
       hints.push('CRITICAL: Testing Library leaked DOM between tests! Import `cleanup` from `@testing-library/react` and `afterEach` from `vitest` directly in `src/App.test.tsx` and call `afterEach(() => cleanup())`.');
     }
-    if (check.output.includes('not.toBeInTheDocument') || check.output.includes('waitForElementToBeRemoved') || check.output.includes('role="status"')) {
+    if (check.output.includes('waitForElementToBeRemoved') || (check.output.includes('role="status"') && !check.output.includes('within('))) {
       hints.push('CRITICAL: Do NOT assert on or waitForElementToBeRemoved on `role="status"` (the live announcer element stays mounted!). Scope todo item checks inside the list using `within(screen.getByRole(\'list\')).queryByText(...)` instead of `screen.queryByText(...)`.');
     }
     if (check.output.includes('eslint')) {
@@ -308,7 +308,8 @@ async function main() {
       `Rules:\n- ${hints.join('\n- ')}`,
       'Return ONLY JSON: { "files": { "<relative-path>": "<updated-full-content>" } }.',
     ].join('\n');
-    const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt });
+    const repairModels = round >= 4 ? richModels : models;
+    const patched = await callGeminiResilient({ apiKey, models: repairModels, prompt: repairPrompt });
     const updated = writeGeneratedFiles(workdir, patched.files);
     console.log(`[mogra-oneshot] Patched ${updated.length} files (${updated.join(', ')}).`);
   }
