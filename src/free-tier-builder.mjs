@@ -149,9 +149,11 @@ function compactErrorOutput(raw) {
   return `${clean.slice(0, 2500)}\n...\n${clean.slice(-2500)}`;
 }
 
+let pwInstalled = false;
+
 function runLocalChecks(workdir) {
   const issues = collectStaticIssues(workdir);
-  const checkEnv = { ...process.env, DEBUG_PRINT_LIMIT: '800' };
+  const checkEnv = { ...process.env, DEBUG_PRINT_LIMIT: '800', CI: process.env.CI || 'true' };
   try {
     execSync(
       'npm install --no-audit --no-fund --loglevel=error && npm run typecheck --if-present && npm run lint --if-present && npm test --if-present && npm run build',
@@ -165,6 +167,26 @@ function runLocalChecks(workdir) {
         stdio: 'pipe',
         maxBuffer: 5 * 1024 * 1024,
       });
+      if (issues.length === 0) {
+        if (!pwInstalled) {
+          console.log('[mogra-oneshot] Installing Playwright Chromium for pre-PR E2E/a11y verification...');
+          execSync('npx playwright install --with-deps chromium', {
+            cwd: workdir,
+            env: checkEnv,
+            encoding: 'utf8',
+            stdio: 'pipe',
+            maxBuffer: 10 * 1024 * 1024,
+          });
+          pwInstalled = true;
+        }
+        execSync('npx playwright test --reporter=list', {
+          cwd: workdir,
+          env: checkEnv,
+          encoding: 'utf8',
+          stdio: 'pipe',
+          maxBuffer: 10 * 1024 * 1024,
+        });
+      }
     }
   } catch (err) {
     issues.push(compactErrorOutput(`${err.stdout ?? ''}\n${err.stderr ?? ''}`));
@@ -223,7 +245,7 @@ async function main() {
       '- index.html',
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
       '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import; ALWAYS scope item presence/removal checks inside the list via `within(screen.getByRole(\'list\'))` and NEVER assert on or `waitForElementToBeRemoved` the `role="status"` live announcer)',
-      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence — ALWAYS assert `toBeVisible()` and `await page.waitForTimeout(150)` BEFORE calling `await page.reload()`, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — and pass `{ exact: true }` to EVERY `getByText(..., { exact: true })` AND `getByRole(..., { name: ..., exact: true })`)',
+      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence — ALWAYS assert `toBeVisible()` and `await page.waitForTimeout(150)` BEFORE calling `await page.reload()`, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — pass `{ exact: true }` to EVERY `getByText(..., { exact: true })` AND `getByRole(..., { name: ..., exact: true })`, and scope checkbox assertions by row/listitem when toggling changes its aria-label)',
       'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json.',
     ].join('\n');
 
