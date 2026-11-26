@@ -51,7 +51,7 @@ async function callGeminiOnce({ apiKey, model, prompt }) {
       'Content-Type': 'application/json',
       'x-goog-api-key': apiKey,
     },
-    signal: AbortSignal.timeout(65_000),
+    signal: AbortSignal.timeout(95_000),
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
@@ -181,7 +181,6 @@ async function main() {
   const models = [...new Set([primaryModel, 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest', ...envCandidates.filter((m) => /flash-lite/.test(m))])];
   const richModels = [...new Set([
     'gemini-3-flash-preview',
-    'gemini-flash-latest',
     ...models,
   ])];
   const promptText = readFileSync(args['prompt-file'], 'utf8');
@@ -217,7 +216,7 @@ async function main() {
     console.log(`[mogra-oneshot] Wrote ${files.length} files (${files.join(', ')}).`);
   }
 
-  for (let round = 1; round <= 5; round++) {
+  for (let round = 1; round <= 7; round++) {
     const check = runLocalChecks(workdir);
     if (check.ok) {
       console.log(`[mogra-oneshot] Local typecheck, lint, unit tests, and build passed.`);
@@ -232,6 +231,9 @@ async function main() {
     ];
     if (check.output.includes('No test files found')) {
       hints.push('CRITICAL: No unit test file matched Vitest include! Create a passing unit test file under src/ (e.g. src/App.test.tsx or src/store.test.ts) right now.');
+    }
+    if (check.output.includes('Found multiple elements') || check.output.includes('getMultipleElementsFoundError')) {
+      hints.push('CRITICAL: Testing Library leaked DOM between tests! Import `cleanup` from `@testing-library/react` and `afterEach` from `vitest` directly in `src/App.test.tsx` and call `afterEach(() => cleanup())`.');
     }
     if (check.output.includes('eslint')) {
       hints.push('If using ESLint v9+, use eslint.config.mjs (remove .eslintrc*), or simplify lint script cleanly.');
