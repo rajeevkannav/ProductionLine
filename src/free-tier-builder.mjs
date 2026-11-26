@@ -134,19 +134,20 @@ function runLocalChecks(workdir) {
     }
     return { ok: true, output: '' };
   } catch (err) {
-    const combined = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim();
-    return { ok: false, output: combined.slice(-3500) };
+    const clean = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.replace(/\x1b\[[0-9;]*m/g, '').trim();
+    return { ok: false, output: clean.slice(-5000) };
   }
 }
 
-function readConfigContext(workdir, errorOutput = '') {
-  const base = ['package.json', 'vitest.config.ts', 'vitest.config.mts', 'vite.config.ts', 'playwright.config.ts', 'tsconfig.json'];
-  const all = listProjectFiles(workdir);
-  const referenced = all.filter((f) => errorOutput.includes(f));
-  const shared = all.filter((f) => /^src\/(types|hooks|lib|utils)\//.test(f) || /^src\/types\.[cm]?ts$/.test(f));
-  const selected = [...new Set([...base, ...referenced, ...shared])].filter((f) => existsSync(join(workdir, f)));
+function readConfigContext(workdir) {
+  const priority = ['package.json', 'vitest.config.ts', 'vitest.config.mts', 'vite.config.ts', 'playwright.config.ts', 'tsconfig.json'];
+  const all = listProjectFiles(workdir).filter((f) => /\.(json|ts|tsx|js|jsx|mjs|cjs|vue|svelte|css|html)$/.test(f));
+  const selected = [...new Set([...priority, ...all])].filter((f) => existsSync(join(workdir, f)));
   return selected
-    .map((file) => `File \`${file}\`:\n\`\`\`\n${readFileSync(join(workdir, file), 'utf8').slice(0, 12000)}\n\`\`\``)
+    .map((file) => {
+      const cap = file.endsWith('.css') ? 1200 : 8000;
+      return `File \`${file}\`:\n\`\`\`\n${readFileSync(join(workdir, file), 'utf8').slice(0, cap)}\n\`\`\``;
+    })
     .join('\n');
 }
 
@@ -191,7 +192,7 @@ async function main() {
       '- playwright.config.ts (testDir:"./e2e", timeout: 120000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" (or "--host 127.0.0.1 --port 4173" for Angular), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env.CI, timeout: 120000 }, use: { baseURL: "http://127.0.0.1:4173" })',
       '- index.html',
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
-      '- Real unit tests under src/ (e.g. src/App.test.tsx) testing CRUD, filters, undo/redo, and safe JSON import',
+      '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import using scoped/role queries that do not collide with `aria-live` announcer text)',
       '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — and pass `{ exact: true }` to `page.getByText(..., { exact: true })` or scope inside `page.getByRole(\'list\')`)',
       'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json.',
     ].join('\n');
@@ -209,7 +210,7 @@ async function main() {
     }
     const existingFiles = listProjectFiles(workdir);
     console.error(`[mogra-oneshot] Check failed (round ${round}); requesting surgical repair:\n${check.output}`);
-    const configContext = readConfigContext(workdir, check.output);
+    const configContext = readConfigContext(workdir);
     const hints = [
       'Keep vitest unit tests isolated to src/**/*.{test,spec}.{ts,tsx} and exclude e2e/** in vitest.config.ts.',
       'Declare any missing packages in package.json.',
