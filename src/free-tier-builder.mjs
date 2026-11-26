@@ -114,8 +114,8 @@ function collectStaticIssues(workdir) {
     if (!e2eSrc.includes('@axe-core/playwright') || !e2eSrc.includes('320')) {
       issues.push('e2e/todomvc.spec.ts MUST include @axe-core/playwright WCAG checks AND a 320px viewport zero-horizontal-overflow reflow check.');
     }
-    if (e2eSrc.split('\n').some((line) => line.includes('.getByText(') && !line.includes('exact:'))) {
-      issues.push('e2e/todomvc.spec.ts MUST pass `{ exact: true }` to every `.getByText(..., { exact: true })` call so sr-only aria-live announcements never cause Playwright strict-mode collisions.');
+    if (e2eSrc.split('\n').some((line) => (line.includes('.getByText(') || (line.includes('.getByRole(') && line.includes('name:'))) && !line.includes('exact:'))) {
+      issues.push('e2e/todomvc.spec.ts MUST pass `{ exact: true }` to every `.getByText(..., { exact: true })` AND `.getByRole(..., { name: ..., exact: true })` call so strict-mode locators never collide with longer aria-labels or aria-live announcements.');
     }
   }
 
@@ -126,6 +126,9 @@ function collectStaticIssues(workdir) {
     combinedSrc += '\n' + content;
     if (/<label\b[^>]*\baria-label\s*=/.test(content)) {
       issues.push(`Accessibility error (axe aria-prohibited-attr) in ${file}: never put aria-label on <label>. Use a <button type="button" aria-label="..."> triggering a hidden <input type="file">, or put <span class="sr-only">...</span> inside <label>.`);
+    }
+    if (/(?:^|[\s"'`])text-(?:slate|gray|zinc|neutral|stone)-(?:300|400)\b/.test(content)) {
+      issues.push(`WCAG color-contrast violation in ${file}: light-mode \`text-slate-400\`/\`text-gray-400\` fails 4.5:1 contrast on light backgrounds (ratio ~2.5:1). Use \`text-slate-600\`/\`text-slate-700\` (and \`dark:text-slate-300\`) instead.`);
     }
   }
   if (!/active/i.test(combinedSrc) || !/completed/i.test(combinedSrc) || !/(indexedDB|localStorage)/.test(combinedSrc) || !/undo/i.test(combinedSrc)) {
@@ -196,7 +199,7 @@ async function main() {
       'Build a COMPLETE, polished, production-quality application — NO minimal toy stubs. Include ALL requested features:',
       '1. Full TodoMVC CRUD: add todo (trimmed non-empty), toggle single & toggle-all, inline edit (Enter/Blur saves, Escape cancels, empty deletes), delete todo, Clear Completed, live remaining count, All/Active/Completed filters.',
       '2. TodoMVC+ Power Features: versioned IndexedDB persistence with localStorage fallback (for jsdom), BroadcastChannel multi-tab sync (feature-detected), Undo/Redo history (buttons + Ctrl+Z / Ctrl+Shift+Z), prototype-pollution-safe validated JSON Export/Import, and accessible Light/Dark theme toggle.',
-      '3. Accessibility & Ultra-Modern CSS: OKLCH + light-dark() design tokens, @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast, visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
+      '3. Accessibility & Ultra-Modern CSS: OKLCH + light-dark() design tokens, @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast (NEVER use text-slate-400 or text-gray-400 on light surfaces — use slate-600/700 for >=4.5:1 ratio and dark:text-slate-300 in dark mode), visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
       '',
       'REQUIRED files checklist:',
       '- package.json (scripts: dev, typecheck: "tsc --noEmit", lint: "tsc --noEmit" or eslint v9 flat config, test: "vitest run", build: "tsc --noEmit && vite build", test:e2e: "playwright test")',
@@ -207,7 +210,7 @@ async function main() {
       '- index.html',
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
       '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import using scoped/role queries that do not collide with `aria-live` announcer text)',
-      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — and pass `{ exact: true }` to `page.getByText(..., { exact: true })` or scope inside `page.getByRole(\'list\')`)',
+      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — and pass `{ exact: true }` to EVERY `getByText(..., { exact: true })` AND `getByRole(..., { name: ..., exact: true })`)',
       'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json.',
     ].join('\n');
 
