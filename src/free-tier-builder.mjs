@@ -115,6 +115,12 @@ function runLocalChecks(workdir) {
       };
     }
     execSync('npx playwright test --list', { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 5 * 1024 * 1024 });
+    execSync('npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler --skipLibCheck e2e/*.ts', {
+      cwd: workdir,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      maxBuffer: 5 * 1024 * 1024,
+    });
     const srcFiles = listProjectFiles(workdir).filter((f) => f.startsWith('src/') && /\.(tsx?|jsx?|vue|svelte|html)$/.test(f));
     for (const file of srcFiles) {
       const content = readFileSync(join(workdir, file), 'utf8');
@@ -180,9 +186,9 @@ async function main() {
       '- vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"])',
       '- playwright.config.ts (testDir:"./e2e", timeout: 120000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" (or "--host 127.0.0.1 --port 4173" for Angular), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env.CI, timeout: 120000 }, use: { baseURL: "http://127.0.0.1:4173" })',
       '- index.html',
-      '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies)',
+      '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
       '- Real unit tests under src/ (e.g. src/App.test.tsx) testing CRUD, filters, undo/redo, and safe JSON import',
-      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; ALWAYS pass `{ exact: true }` to `page.getByText(..., { exact: true })` or scope inside `page.getByRole(\'list\')` so `sr-only` `aria-live` announcements never cause Playwright strict-mode collisions)',
+      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — and pass `{ exact: true }` to `page.getByText(..., { exact: true })` or scope inside `page.getByRole(\'list\')`)',
       'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json.',
     ].join('\n');
 
