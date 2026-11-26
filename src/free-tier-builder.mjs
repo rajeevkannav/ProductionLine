@@ -114,6 +114,9 @@ function collectStaticIssues(workdir) {
     if (!e2eSrc.includes('@axe-core/playwright') || !e2eSrc.includes('320')) {
       issues.push('e2e/todomvc.spec.ts MUST include @axe-core/playwright WCAG checks AND a 320px viewport zero-horizontal-overflow reflow check.');
     }
+    if (e2eSrc.split('\n').some((line) => line.includes('.getByText(') && !line.includes('exact:'))) {
+      issues.push('e2e/todomvc.spec.ts MUST pass `{ exact: true }` to every `.getByText(..., { exact: true })` call so sr-only aria-live announcements never cause Playwright strict-mode collisions.');
+    }
   }
 
   const srcFiles = listProjectFiles(workdir).filter((f) => f.startsWith('src/') && /\.(tsx?|jsx?|vue|svelte|html)$/.test(f));
