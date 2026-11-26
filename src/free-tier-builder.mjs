@@ -51,7 +51,7 @@ async function callGeminiOnce({ apiKey, model, prompt }) {
       'Content-Type': 'application/json',
       'x-goog-api-key': apiKey,
     },
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(65_000),
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
@@ -109,10 +109,17 @@ function runLocalChecks(workdir) {
       };
     }
     const pwCfg = readFileSync(pwCfgPath, 'utf8');
-    if (pwCfg.includes('127.0.0.1') && !pwCfg.includes('--host 127.0.0.1') && !pwCfg.includes('--host=127.0.0.1')) {
+    if (!pwCfg.includes('127.0.0.1') || (!pwCfg.includes('--host 127.0.0.1') && !pwCfg.includes('--host=127.0.0.1'))) {
       return {
         ok: false,
-        output: 'playwright.config.ts webServer.url uses 127.0.0.1, so webServer.command MUST pass `--host 127.0.0.1` (otherwise Vite binds IPv6 ::1 on Linux CI and Playwright times out).',
+        output: 'playwright.config.ts MUST bind IPv4 explicitly: set webServer.command with `--host 127.0.0.1 --port 4173 --strictPort` (or `--host 127.0.0.1 --port 4173`) and webServer.url + use.baseURL to `http://127.0.0.1:4173` (never localhost).',
+      };
+    }
+    const e2eSrc = readFileSync(join(workdir, 'e2e/todomvc.spec.ts'), 'utf8');
+    if (!e2eSrc.includes('@axe-core/playwright') || !e2eSrc.includes('320')) {
+      return {
+        ok: false,
+        output: 'e2e/todomvc.spec.ts MUST include @axe-core/playwright WCAG checks AND a 320px viewport zero-horizontal-overflow reflow check.',
       };
     }
     execSync('npx playwright test --list', { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 5 * 1024 * 1024 });
@@ -123,14 +130,22 @@ function runLocalChecks(workdir) {
       maxBuffer: 5 * 1024 * 1024,
     });
     const srcFiles = listProjectFiles(workdir).filter((f) => f.startsWith('src/') && /\.(tsx?|jsx?|vue|svelte|html)$/.test(f));
+    let combinedSrc = '';
     for (const file of srcFiles) {
       const content = readFileSync(join(workdir, file), 'utf8');
+      combinedSrc += '\n' + content;
       if (/<label\b[^>]*\baria-label\s*=/.test(content)) {
         return {
           ok: false,
           output: `Accessibility error (axe aria-prohibited-attr) in ${file}: never put aria-label on <label>. Use a <button type="button" aria-label="..."> triggering a hidden <input type="file">, or put <span class="sr-only">...</span> inside <label>.`,
         };
       }
+    }
+    if (!/active/i.test(combinedSrc) || !/completed/i.test(combinedSrc) || !/(indexedDB|localStorage)/.test(combinedSrc) || !/undo/i.test(combinedSrc)) {
+      return {
+        ok: false,
+        output: 'Incomplete TodoMVC+ app in src/: must include filters (All/Active/Completed), persistent IndexedDB/localStorage storage, and Undo/Redo support (not a bare add-only toy).',
+      };
     }
     return { ok: true, output: '' };
   } catch (err) {
@@ -161,12 +176,10 @@ async function main() {
   const workdir = resolve(args.workdir ?? '.');
   const primaryModel = args.model ?? 'gemini-3.1-flash-lite';
   const envCandidates = (process.env.MOGRA_CANDIDATES ?? '').split(/\s+/).filter(Boolean);
-  const models = [...new Set([primaryModel, ...envCandidates])];
+  const models = [...new Set([primaryModel, 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest', ...envCandidates.filter((m) => /flash-lite/.test(m))])];
   const richModels = [...new Set([
     'gemini-3-flash-preview',
     'gemini-flash-latest',
-    'gemini-2.5-flash',
-    ...models.filter((m) => !m.includes('flash-lite')),
     ...models,
   ])];
   const promptText = readFileSync(args['prompt-file'], 'utf8');
