@@ -128,7 +128,7 @@ async function main() {
       '',
       '## Output Format (STRICT JSON)',
       'Return ONLY a JSON object with shape: { "files": { "<relative-path>": "<full-file-content>" } }.',
-      'Generate all files needed in the working directory: package.json, tsconfig.json, vite.config.ts, vitest.config.ts (excluding e2e/**), playwright.config.ts, index.html, src/*, and e2e/todomvc.spec.ts.',
+      'Generate all files needed in the working directory: package.json, tsconfig.json, vite.config.ts, vitest.config.ts (excluding e2e/**), playwright.config.ts, index.html, src/*, at least one unit test file under src/*.test.ts(x), and e2e/todomvc.spec.ts.',
       'Ensure EVERY package imported in vite.config.ts, vitest.config.ts, playwright.config.ts, src/*, or e2e/* is declared in package.json dependencies or devDependencies.',
       'Keep code clean, accessible (WCAG 2.2 AA+, 320px zero-overflow reflow), and complete.',
     ].join('\n');
@@ -150,7 +150,7 @@ async function main() {
       ? readFileSync(join(workdir, 'package.json'), 'utf8')
       : '';
     const repairPrompt = [
-      `Fix ONLY the failing files among [${existingFiles.join(', ')}] based on this error:`,
+      `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve this error:`,
       '```',
       check.output,
       '```',
