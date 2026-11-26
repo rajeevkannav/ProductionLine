@@ -97,7 +97,7 @@ async function callGeminiResilient({ apiKey, models, prompt }) {
 function runLocalChecks(workdir) {
   try {
     execSync(
-      'npm install --no-audit --no-fund && npm run typecheck --if-present && npm test --if-present && npm run build',
+      'npm install --no-audit --no-fund && npm run typecheck --if-present && npm run lint --if-present && npm test --if-present && npm run build',
       { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 },
     );
     return { ok: true, output: '' };
@@ -105,6 +105,14 @@ function runLocalChecks(workdir) {
     const combined = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim();
     return { ok: false, output: combined.slice(-3500) };
   }
+}
+
+function readConfigContext(workdir) {
+  const candidates = ['package.json', 'vitest.config.ts', 'vitest.config.mts', 'vite.config.ts', 'playwright.config.ts', 'tsconfig.json'];
+  return candidates
+    .filter((file) => existsSync(join(workdir, file)))
+    .map((file) => `File \`${file}\`:\n\`\`\`\n${readFileSync(join(workdir, file), 'utf8').slice(0, 2500)}\n\`\`\``)
+    .join('\n');
 }
 
 async function main() {
@@ -128,8 +136,8 @@ async function main() {
       '',
       '## Output Format (STRICT JSON)',
       'Return ONLY a JSON object with shape: { "files": { "<relative-path>": "<full-file-content>" } }.',
-      'Generate all files needed in the working directory: package.json, tsconfig.json, vite.config.ts, vitest.config.ts (excluding e2e/**), playwright.config.ts, index.html, src/*, at least one unit test file under src/*.test.ts(x), and e2e/todomvc.spec.ts.',
-      'Ensure EVERY package imported in vite.config.ts, vitest.config.ts, playwright.config.ts, src/*, or e2e/* is declared in package.json dependencies or devDependencies.',
+      'Generate all files needed in the working directory: package.json (scripts: typecheck, lint, test, build, test:e2e), tsconfig.json, vite.config.ts (with base: process.env.VITE_BASE_PATH || "/"), vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"]), playwright.config.ts (testDir:"./e2e", webServer command:"npm run dev -- --port 4173 --strictPort", url:"http://127.0.0.1:4173", use.baseURL:"http://127.0.0.1:4173"), index.html, src/*, at least one unit test file under src/*.test.ts(x), and e2e/todomvc.spec.ts.',
+      'Ensure EVERY package imported in vite.config.ts, vitest.config.ts, playwright.config.ts, src/*, or e2e/* (e.g. vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright) is declared in package.json dependencies or devDependencies.',
       'Keep code clean, accessible (WCAG 2.2 AA+, 320px zero-overflow reflow), and complete.',
     ].join('\n');
 
@@ -141,20 +149,19 @@ async function main() {
   for (let round = 1; round <= 3; round++) {
     const check = runLocalChecks(workdir);
     if (check.ok) {
-      console.log(`[mogra-oneshot] Local typecheck, unit tests, and build passed.`);
+      console.log(`[mogra-oneshot] Local typecheck, lint, unit tests, and build passed.`);
       return;
     }
     const existingFiles = listProjectFiles(workdir);
     console.error(`[mogra-oneshot] Check failed (round ${round}); requesting surgical repair:\n${check.output}`);
-    const pkgJson = existsSync(join(workdir, 'package.json'))
-      ? readFileSync(join(workdir, 'package.json'), 'utf8')
-      : '';
+    const configContext = readConfigContext(workdir);
     const repairPrompt = [
       `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve this error:`,
       '```',
       check.output,
       '```',
-      pkgJson ? `Current package.json:\n\`\`\`json\n${pkgJson}\n\`\`\`` : '',
+      configContext,
+      'Rules: Keep vitest unit tests isolated to src/**/*.{test,spec}.{ts,tsx} and exclude e2e/** in vitest.config.ts. Declare any missing packages in package.json.',
       'Return ONLY JSON: { "files": { "<relative-path>": "<updated-full-content>" } }.',
     ].join('\n');
     const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt });
