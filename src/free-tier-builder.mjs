@@ -136,17 +136,27 @@ async function main() {
       '',
       '## Output Format (STRICT JSON)',
       'Return ONLY a JSON object with shape: { "files": { "<relative-path>": "<full-file-content>" } }.',
-      'Generate all files needed in the working directory: package.json (scripts: typecheck, lint, test, build, test:e2e), tsconfig.json, vite.config.ts (with base: process.env.VITE_BASE_PATH || "/"), vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"]), playwright.config.ts (testDir:"./e2e", webServer command:"npm run dev -- --port 4173 --strictPort", url:"http://127.0.0.1:4173", use.baseURL:"http://127.0.0.1:4173"), index.html, src/*, at least one unit test file under src/*.test.ts(x), and e2e/todomvc.spec.ts.',
-      'Ensure EVERY package imported in vite.config.ts, vitest.config.ts, playwright.config.ts, src/*, or e2e/* (e.g. vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright) is declared in package.json dependencies or devDependencies.',
+      'REQUIRED files checklist:',
+      '- package.json (scripts: typecheck, lint, test, build, test:e2e)',
+      '- tsconfig.json',
+      '- vite.config.ts (with base: process.env.VITE_BASE_PATH || "/")',
+      '- vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"])',
+      '- playwright.config.ts (testDir:"./e2e", webServer command:"npm run dev -- --port 4173 --strictPort", url:"http://127.0.0.1:4173", use.baseURL:"http://127.0.0.1:4173")',
+      '- index.html',
+      '- src/* application source files & clean modern CSS (prefer native CSS variables/layers without postcss.config.js)',
+      '- AT LEAST ONE real unit test file under src/ (e.g. src/App.test.tsx or src/todo.test.ts) using vitest',
+      '- e2e/todomvc.spec.ts (Playwright + @axe-core/playwright + 320px reflow check)',
+      'For lint: use ESLint v9 flat config (eslint.config.mjs with eslint + @eslint/js + typescript-eslint, NEVER .eslintrc*) OR `"lint": "tsc --noEmit"`.',
+      'Ensure EVERY package imported in any config, src/*, or e2e/* (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is listed in package.json.',
       'Keep code clean, accessible (WCAG 2.2 AA+, 320px zero-overflow reflow), and complete.',
     ].join('\n');
 
     const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt });
     const files = writeGeneratedFiles(workdir, first.files);
-    console.log(`[mogra-oneshot] Wrote ${files.length} files.`);
+    console.log(`[mogra-oneshot] Wrote ${files.length} files (${files.join(', ')}).`);
   }
 
-  for (let round = 1; round <= 3; round++) {
+  for (let round = 1; round <= 5; round++) {
     const check = runLocalChecks(workdir);
     if (check.ok) {
       console.log(`[mogra-oneshot] Local typecheck, lint, unit tests, and build passed.`);
@@ -155,18 +165,28 @@ async function main() {
     const existingFiles = listProjectFiles(workdir);
     console.error(`[mogra-oneshot] Check failed (round ${round}); requesting surgical repair:\n${check.output}`);
     const configContext = readConfigContext(workdir);
+    const hints = [
+      'Keep vitest unit tests isolated to src/**/*.{test,spec}.{ts,tsx} and exclude e2e/** in vitest.config.ts.',
+      'Declare any missing packages in package.json.',
+    ];
+    if (check.output.includes('No test files found')) {
+      hints.push('CRITICAL: No unit test file matched Vitest include! Create a passing unit test file under src/ (e.g. src/App.test.tsx or src/store.test.ts) right now.');
+    }
+    if (check.output.includes('eslint')) {
+      hints.push('If using ESLint v9+, use eslint.config.mjs (remove .eslintrc*), or simplify lint script cleanly.');
+    }
     const repairPrompt = [
-      `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve this error:`,
+      `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve ALL errors shown below:`,
       '```',
       check.output,
       '```',
       configContext,
-      'Rules: Keep vitest unit tests isolated to src/**/*.{test,spec}.{ts,tsx} and exclude e2e/** in vitest.config.ts. Declare any missing packages in package.json.',
+      `Rules:\n- ${hints.join('\n- ')}`,
       'Return ONLY JSON: { "files": { "<relative-path>": "<updated-full-content>" } }.',
     ].join('\n');
     const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt });
     const updated = writeGeneratedFiles(workdir, patched.files);
-    console.log(`[mogra-oneshot] Patched ${updated.length} files.`);
+    console.log(`[mogra-oneshot] Patched ${updated.length} files (${updated.join(', ')}).`);
   }
 
   const finalCheck = runLocalChecks(workdir);
