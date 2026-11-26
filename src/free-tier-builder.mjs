@@ -101,15 +101,20 @@ function runLocalChecks(workdir) {
       { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 },
     );
     const pwCfgPath = join(workdir, 'playwright.config.ts');
-    if (existsSync(pwCfgPath)) {
-      const pwCfg = readFileSync(pwCfgPath, 'utf8');
-      if (pwCfg.includes('127.0.0.1') && !pwCfg.includes('--host 127.0.0.1') && !pwCfg.includes('--host=127.0.0.1')) {
-        return {
-          ok: false,
-          output: 'playwright.config.ts webServer.url uses 127.0.0.1, so webServer.command MUST pass `--host 127.0.0.1` (otherwise Vite binds IPv6 ::1 on Linux CI and Playwright times out).',
-        };
-      }
+    if (!existsSync(pwCfgPath) || !existsSync(join(workdir, 'e2e/todomvc.spec.ts'))) {
+      return {
+        ok: false,
+        output: 'Missing required Playwright files: create both playwright.config.ts and e2e/todomvc.spec.ts.',
+      };
     }
+    const pwCfg = readFileSync(pwCfgPath, 'utf8');
+    if (pwCfg.includes('127.0.0.1') && !pwCfg.includes('--host 127.0.0.1') && !pwCfg.includes('--host=127.0.0.1')) {
+      return {
+        ok: false,
+        output: 'playwright.config.ts webServer.url uses 127.0.0.1, so webServer.command MUST pass `--host 127.0.0.1` (otherwise Vite binds IPv6 ::1 on Linux CI and Playwright times out).',
+      };
+    }
+    execSync('npx playwright test --list', { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 5 * 1024 * 1024 });
     return { ok: true, output: '' };
   } catch (err) {
     const combined = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim();
@@ -136,6 +141,13 @@ async function main() {
   const primaryModel = args.model ?? 'gemini-3.1-flash-lite';
   const envCandidates = (process.env.MOGRA_CANDIDATES ?? '').split(/\s+/).filter(Boolean);
   const models = [...new Set([primaryModel, ...envCandidates])];
+  const richModels = [...new Set([
+    'gemini-2.5-flash',
+    'gemini-3-flash-preview',
+    'gemini-flash-latest',
+    ...models.filter((m) => !m.includes('flash-lite')),
+    ...models,
+  ])];
   const promptText = readFileSync(args['prompt-file'], 'utf8');
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is required');
@@ -164,7 +176,7 @@ async function main() {
       'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json.',
     ].join('\n');
 
-    const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt });
+    const first = await callGeminiResilient({ apiKey, models: richModels, prompt: initialPrompt });
     const files = writeGeneratedFiles(workdir, first.files);
     console.log(`[mogra-oneshot] Wrote ${files.length} files (${files.join(', ')}).`);
   }
