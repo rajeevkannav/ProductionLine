@@ -194,17 +194,22 @@ function runLocalChecks(workdir) {
           });
           pwInstalled = true;
         }
-        execSync('npx playwright test --reporter=list', {
-          cwd: workdir,
-          env: checkEnv,
-          encoding: 'utf8',
-          stdio: 'pipe',
-          maxBuffer: 10 * 1024 * 1024,
-        });
+        const pwOutFile = `/tmp/mogra-e2e-${process.pid}.log`;
+        try {
+          execSync(`npx playwright test --reporter=list --retries=0 --timeout=20000 > "${pwOutFile}" 2>&1`, {
+            cwd: workdir,
+            env: checkEnv,
+            timeout: 90_000,
+            stdio: 'ignore',
+          });
+        } catch (pwErr) {
+          const pwLog = existsSync(pwOutFile) ? readFileSync(pwOutFile, 'utf8') : pwErr.message;
+          throw new Error(`Playwright E2E failed:\n${pwLog}`);
+        }
       }
     }
   } catch (err) {
-    issues.push(compactErrorOutput(`${err.stdout ?? ''}\n${err.stderr ?? ''}`));
+    issues.push(compactErrorOutput(`${err.stdout ?? ''}\n${err.stderr ?? ''}\n${err.message ?? ''}`));
   }
   return issues.length === 0 ? { ok: true, output: '' } : { ok: false, output: issues.join('\n\n').slice(-5500) };
 }
@@ -256,7 +261,7 @@ async function main() {
       '- tsconfig.json (MUST have "noEmit": true so tsc never emits .js files into src/ or e2e/)',
       '- vite.config.ts (with base: process.env.VITE_BASE_PATH || "/")',
       '- vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"])',
-      '- playwright.config.ts (testDir:"./e2e", timeout: 120000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" (or "--host 127.0.0.1 --port 4173" for Angular), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env.CI, timeout: 120000 }, use: { baseURL: "http://127.0.0.1:4173" })',
+      '- playwright.config.ts (testDir:"./e2e", timeout: 30000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" (or "--host 127.0.0.1 --port 4173" for Angular), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env.CI, timeout: 60000 }, use: { baseURL: "http://127.0.0.1:4173" })',
       '- index.html',
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
       '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import; ALWAYS scope item presence/removal checks inside the list via `within(screen.getByRole(\'list\'))` and NEVER assert on or `waitForElementToBeRemoved` the `role="status"` live announcer)',
