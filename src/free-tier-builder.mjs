@@ -51,6 +51,7 @@ async function callGeminiOnce({ apiKey, model, prompt }) {
       'Content-Type': 'application/json',
       'x-goog-api-key': apiKey,
     },
+    signal: AbortSignal.timeout(90_000),
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
@@ -72,7 +73,7 @@ async function callGeminiOnce({ apiKey, model, prompt }) {
   return JSON.parse(raw);
 }
 
-/** Call Gemini rotating across candidate models and backing off cleanly on 429/503. */
+/** Call Gemini rotating across candidate models and backing off cleanly on 429/503/network timeouts. */
 async function callGeminiResilient({ apiKey, models, prompt }) {
   let lastErr;
   for (const backoffSec of [0, 15, 35]) {
@@ -87,7 +88,7 @@ async function callGeminiResilient({ apiKey, models, prompt }) {
       } catch (err) {
         lastErr = err;
         console.error(`[mogra-oneshot] ${err.message}`);
-        if (err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
+        if (err.status && err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
       }
     }
   }
@@ -138,11 +139,14 @@ function runLocalChecks(workdir) {
   }
 }
 
-function readConfigContext(workdir) {
-  const candidates = ['package.json', 'vitest.config.ts', 'vitest.config.mts', 'vite.config.ts', 'playwright.config.ts', 'tsconfig.json'];
-  return candidates
-    .filter((file) => existsSync(join(workdir, file)))
-    .map((file) => `File \`${file}\`:\n\`\`\`\n${readFileSync(join(workdir, file), 'utf8').slice(0, 2500)}\n\`\`\``)
+function readConfigContext(workdir, errorOutput = '') {
+  const base = ['package.json', 'vitest.config.ts', 'vitest.config.mts', 'vite.config.ts', 'playwright.config.ts', 'tsconfig.json'];
+  const all = listProjectFiles(workdir);
+  const referenced = all.filter((f) => errorOutput.includes(f));
+  const shared = all.filter((f) => /^src\/(types|hooks|lib|utils)\//.test(f) || /^src\/types\.[cm]?ts$/.test(f));
+  const selected = [...new Set([...base, ...referenced, ...shared])].filter((f) => existsSync(join(workdir, f)));
+  return selected
+    .map((file) => `File \`${file}\`:\n\`\`\`\n${readFileSync(join(workdir, file), 'utf8').slice(0, 12000)}\n\`\`\``)
     .join('\n');
 }
 
@@ -158,9 +162,9 @@ async function main() {
   const envCandidates = (process.env.MOGRA_CANDIDATES ?? '').split(/\s+/).filter(Boolean);
   const models = [...new Set([primaryModel, ...envCandidates])];
   const richModels = [...new Set([
-    'gemini-2.5-flash',
     'gemini-3-flash-preview',
     'gemini-flash-latest',
+    'gemini-2.5-flash',
     ...models.filter((m) => !m.includes('flash-lite')),
     ...models,
   ])];
@@ -205,7 +209,7 @@ async function main() {
     }
     const existingFiles = listProjectFiles(workdir);
     console.error(`[mogra-oneshot] Check failed (round ${round}); requesting surgical repair:\n${check.output}`);
-    const configContext = readConfigContext(workdir);
+    const configContext = readConfigContext(workdir, check.output);
     const hints = [
       'Keep vitest unit tests isolated to src/**/*.{test,spec}.{ts,tsx} and exclude e2e/** in vitest.config.ts.',
       'Declare any missing packages in package.json.',
