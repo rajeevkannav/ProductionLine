@@ -115,6 +115,16 @@ function runLocalChecks(workdir) {
       };
     }
     execSync('npx playwright test --list', { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 5 * 1024 * 1024 });
+    const srcFiles = listProjectFiles(workdir).filter((f) => f.startsWith('src/') && /\.(tsx?|jsx?|vue|svelte|html)$/.test(f));
+    for (const file of srcFiles) {
+      const content = readFileSync(join(workdir, file), 'utf8');
+      if (/<label\b[^>]*\baria-label\s*=/.test(content)) {
+        return {
+          ok: false,
+          output: `Accessibility error (axe aria-prohibited-attr) in ${file}: never put aria-label on <label>. Use a <button type="button" aria-label="..."> triggering a hidden <input type="file">, or put <span class="sr-only">...</span> inside <label>.`,
+        };
+      }
+    }
     return { ok: true, output: '' };
   } catch (err) {
     const combined = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.trim();
@@ -161,7 +171,7 @@ async function main() {
       'Build a COMPLETE, polished, production-quality application — NO minimal toy stubs. Include ALL requested features:',
       '1. Full TodoMVC CRUD: add todo (trimmed non-empty), toggle single & toggle-all, inline edit (Enter/Blur saves, Escape cancels, empty deletes), delete todo, Clear Completed, live remaining count, All/Active/Completed filters.',
       '2. TodoMVC+ Power Features: versioned IndexedDB persistence with localStorage fallback (for jsdom), BroadcastChannel multi-tab sync (feature-detected), Undo/Redo history (buttons + Ctrl+Z / Ctrl+Shift+Z), prototype-pollution-safe validated JSON Export/Import, and accessible Light/Dark theme toggle.',
-      '3. Accessibility & Ultra-Modern CSS: OKLCH + light-dark() design tokens, @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast, visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support.',
+      '3. Accessibility & Ultra-Modern CSS: OKLCH + light-dark() design tokens, @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast, visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
       '',
       'REQUIRED files checklist:',
       '- package.json (scripts: dev, typecheck: "tsc --noEmit", lint: "tsc --noEmit" or eslint v9 flat config, test: "vitest run", build: "tsc --noEmit && vite build", test:e2e: "playwright test")',
@@ -172,7 +182,7 @@ async function main() {
       '- index.html',
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies)',
       '- Real unit tests under src/ (e.g. src/App.test.tsx) testing CRUD, filters, undo/redo, and safe JSON import',
-      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations)',
+      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; ALWAYS pass `{ exact: true }` to `page.getByText(..., { exact: true })` or scope inside `page.getByRole(\'list\')` so `sr-only` `aria-live` announcements never cause Playwright strict-mode collisions)',
       'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json.',
     ].join('\n');
 
