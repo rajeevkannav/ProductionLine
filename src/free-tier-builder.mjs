@@ -95,63 +95,62 @@ async function callGeminiResilient({ apiKey, models, prompt }) {
   throw lastErr;
 }
 
+function collectStaticIssues(workdir) {
+  const issues = [];
+  const pwCfgPath = join(workdir, 'playwright.config.ts');
+  const e2ePath = join(workdir, 'e2e/todomvc.spec.ts');
+  if (!existsSync(pwCfgPath)) {
+    issues.push('Missing required file: playwright.config.ts.');
+  } else {
+    const pwCfg = readFileSync(pwCfgPath, 'utf8');
+    if (!pwCfg.includes('127.0.0.1') || (!pwCfg.includes('--host 127.0.0.1') && !pwCfg.includes('--host=127.0.0.1'))) {
+      issues.push('playwright.config.ts MUST bind IPv4 explicitly: set webServer.command with `--host 127.0.0.1 --port 4173 --strictPort` (or `--host 127.0.0.1 --port 4173`) and webServer.url + use.baseURL to `http://127.0.0.1:4173` (never localhost).');
+    }
+  }
+  if (!existsSync(e2ePath)) {
+    issues.push('Missing required file: e2e/todomvc.spec.ts.');
+  } else {
+    const e2eSrc = readFileSync(e2ePath, 'utf8');
+    if (!e2eSrc.includes('@axe-core/playwright') || !e2eSrc.includes('320')) {
+      issues.push('e2e/todomvc.spec.ts MUST include @axe-core/playwright WCAG checks AND a 320px viewport zero-horizontal-overflow reflow check.');
+    }
+  }
+
+  const srcFiles = listProjectFiles(workdir).filter((f) => f.startsWith('src/') && /\.(tsx?|jsx?|vue|svelte|html)$/.test(f));
+  let combinedSrc = '';
+  for (const file of srcFiles) {
+    const content = readFileSync(join(workdir, file), 'utf8');
+    combinedSrc += '\n' + content;
+    if (/<label\b[^>]*\baria-label\s*=/.test(content)) {
+      issues.push(`Accessibility error (axe aria-prohibited-attr) in ${file}: never put aria-label on <label>. Use a <button type="button" aria-label="..."> triggering a hidden <input type="file">, or put <span class="sr-only">...</span> inside <label>.`);
+    }
+  }
+  if (!/active/i.test(combinedSrc) || !/completed/i.test(combinedSrc) || !/(indexedDB|localStorage)/.test(combinedSrc) || !/undo/i.test(combinedSrc)) {
+    issues.push('Incomplete TodoMVC+ app in src/: must include filters (All/Active/Completed), persistent IndexedDB/localStorage storage, and Undo/Redo support (not a bare add-only toy).');
+  }
+  return issues;
+}
+
 function runLocalChecks(workdir) {
+  const issues = collectStaticIssues(workdir);
   try {
     execSync(
       'npm install --no-audit --no-fund && npm run typecheck --if-present && npm run lint --if-present && npm test --if-present && npm run build',
       { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 },
     );
-    const pwCfgPath = join(workdir, 'playwright.config.ts');
-    if (!existsSync(pwCfgPath) || !existsSync(join(workdir, 'e2e/todomvc.spec.ts'))) {
-      return {
-        ok: false,
-        output: 'Missing required Playwright files: create both playwright.config.ts and e2e/todomvc.spec.ts.',
-      };
+    if (existsSync(join(workdir, 'playwright.config.ts')) && existsSync(join(workdir, 'e2e/todomvc.spec.ts'))) {
+      execSync('npx playwright test --list && npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler --skipLibCheck e2e/*.ts', {
+        cwd: workdir,
+        encoding: 'utf8',
+        stdio: 'pipe',
+        maxBuffer: 5 * 1024 * 1024,
+      });
     }
-    const pwCfg = readFileSync(pwCfgPath, 'utf8');
-    if (!pwCfg.includes('127.0.0.1') || (!pwCfg.includes('--host 127.0.0.1') && !pwCfg.includes('--host=127.0.0.1'))) {
-      return {
-        ok: false,
-        output: 'playwright.config.ts MUST bind IPv4 explicitly: set webServer.command with `--host 127.0.0.1 --port 4173 --strictPort` (or `--host 127.0.0.1 --port 4173`) and webServer.url + use.baseURL to `http://127.0.0.1:4173` (never localhost).',
-      };
-    }
-    const e2eSrc = readFileSync(join(workdir, 'e2e/todomvc.spec.ts'), 'utf8');
-    if (!e2eSrc.includes('@axe-core/playwright') || !e2eSrc.includes('320')) {
-      return {
-        ok: false,
-        output: 'e2e/todomvc.spec.ts MUST include @axe-core/playwright WCAG checks AND a 320px viewport zero-horizontal-overflow reflow check.',
-      };
-    }
-    execSync('npx playwright test --list', { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 5 * 1024 * 1024 });
-    execSync('npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler --skipLibCheck e2e/*.ts', {
-      cwd: workdir,
-      encoding: 'utf8',
-      stdio: 'pipe',
-      maxBuffer: 5 * 1024 * 1024,
-    });
-    const srcFiles = listProjectFiles(workdir).filter((f) => f.startsWith('src/') && /\.(tsx?|jsx?|vue|svelte|html)$/.test(f));
-    let combinedSrc = '';
-    for (const file of srcFiles) {
-      const content = readFileSync(join(workdir, file), 'utf8');
-      combinedSrc += '\n' + content;
-      if (/<label\b[^>]*\baria-label\s*=/.test(content)) {
-        return {
-          ok: false,
-          output: `Accessibility error (axe aria-prohibited-attr) in ${file}: never put aria-label on <label>. Use a <button type="button" aria-label="..."> triggering a hidden <input type="file">, or put <span class="sr-only">...</span> inside <label>.`,
-        };
-      }
-    }
-    if (!/active/i.test(combinedSrc) || !/completed/i.test(combinedSrc) || !/(indexedDB|localStorage)/.test(combinedSrc) || !/undo/i.test(combinedSrc)) {
-      return {
-        ok: false,
-        output: 'Incomplete TodoMVC+ app in src/: must include filters (All/Active/Completed), persistent IndexedDB/localStorage storage, and Undo/Redo support (not a bare add-only toy).',
-      };
-    }
-    return { ok: true, output: '' };
   } catch (err) {
     const clean = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.replace(/\x1b\[[0-9;]*m/g, '').trim();
-    return { ok: false, output: clean.slice(-5000) };
+    issues.push(clean.slice(-4000));
   }
+  return issues.length === 0 ? { ok: true, output: '' } : { ok: false, output: issues.join('\n\n').slice(-5500) };
 }
 
 function readConfigContext(workdir) {
