@@ -117,6 +117,9 @@ function collectStaticIssues(workdir) {
     if (e2eSrc.split('\n').some((line) => (line.includes('.getByText(') || (line.includes('.getByRole(') && line.includes('name:'))) && !line.includes('exact:'))) {
       issues.push('e2e/todomvc.spec.ts MUST pass `{ exact: true }` to every `.getByText(..., { exact: true })` AND `.getByRole(..., { name: ..., exact: true })` call so strict-mode locators never collide with longer aria-labels or aria-live announcements.');
     }
+    if (/press\(['"]Enter['"]\)\s*;\s*(?:\/\/[^\n]*\n)?\s*await\s+page\.reload\s*\(/.test(e2eSrc)) {
+      issues.push('e2e/todomvc.spec.ts calls `page.reload()` immediately after `press("Enter")` without waiting for the item to render or IndexedDB to commit. Assert `.toBeVisible()` and `await page.waitForTimeout(150)` BEFORE `await page.reload()`.');
+    }
   }
 
   const srcFiles = listProjectFiles(workdir).filter((f) => f.startsWith('src/') && /\.(tsx?|jsx?|vue|svelte|html)$/.test(f));
@@ -208,7 +211,7 @@ async function main() {
       'Return ONLY a JSON object with shape: { "files": { "<relative-path>": "<full-file-content>" } }.',
       'Build a COMPLETE, polished, production-quality application — NO minimal toy stubs. Include ALL requested features:',
       '1. Full TodoMVC CRUD: add todo (trimmed non-empty), toggle single & toggle-all, inline edit (Enter/Blur saves, Escape cancels, empty deletes), delete todo, Clear Completed, live remaining count, All/Active/Completed filters.',
-      '2. TodoMVC+ Power Features: versioned IndexedDB persistence with localStorage fallback (for jsdom), BroadcastChannel multi-tab sync (feature-detected), Undo/Redo history (buttons + Ctrl+Z / Ctrl+Shift+Z), prototype-pollution-safe validated JSON Export/Import, and accessible Light/Dark theme toggle.',
+      '2. TodoMVC+ Power Features: versioned IndexedDB persistence WITH synchronous localStorage write-through mirror on every save (and fast localStorage read fallback so immediate reloads never lose in-flight IndexedDB writes, and initial mount never overwrites persisted items with []), BroadcastChannel multi-tab sync (feature-detected), Undo/Redo history (buttons + Ctrl+Z / Ctrl+Shift+Z), prototype-pollution-safe validated JSON Export/Import, and accessible Light/Dark theme toggle.',
       '3. Accessibility & Ultra-Modern CSS: OKLCH + light-dark() design tokens, @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast (NEVER use text-slate-400 or text-gray-400 on light surfaces — use slate-600/700 for >=4.5:1 ratio and dark:text-slate-300 in dark mode), visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
       '',
       'REQUIRED files checklist:',
@@ -220,7 +223,7 @@ async function main() {
       '- index.html',
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
       '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import; ALWAYS scope item presence/removal checks inside the list via `within(screen.getByRole(\'list\'))` and NEVER assert on or `waitForElementToBeRemoved` the `role="status"` live announcer)',
-      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — and pass `{ exact: true }` to EVERY `getByText(..., { exact: true })` AND `getByRole(..., { name: ..., exact: true })`)',
+      '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence — ALWAYS assert `toBeVisible()` and `await page.waitForTimeout(150)` BEFORE calling `await page.reload()`, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — and pass `{ exact: true }` to EVERY `getByText(..., { exact: true })` AND `getByRole(..., { name: ..., exact: true })`)',
       'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json.',
     ].join('\n');
 
