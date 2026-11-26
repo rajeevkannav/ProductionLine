@@ -82,13 +82,20 @@ async function callGeminiResilient({ apiKey, models, prompt }) {
       await sleep(backoffSec * 1000);
     }
     for (const model of models) {
-      try {
-        console.log(`[mogra-oneshot] calling model='${model}'...`);
-        return await callGeminiOnce({ apiKey, model, prompt });
-      } catch (err) {
-        lastErr = err;
-        console.error(`[mogra-oneshot] ${err.message}`);
-        if (err.status && err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
+      for (let attempt = 1; attempt <= (model.includes('flash-lite') ? 1 : 2); attempt++) {
+        try {
+          console.log(`[mogra-oneshot] calling model='${model}'...`);
+          return await callGeminiOnce({ apiKey, model, prompt });
+        } catch (err) {
+          lastErr = err;
+          console.error(`[mogra-oneshot] ${err.message}`);
+          if (err.status && err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
+          if (!model.includes('flash-lite') && err.status === 503 && attempt === 1) {
+            await sleep(4000);
+            continue;
+          }
+          break;
+        }
       }
     }
   }
@@ -97,6 +104,14 @@ async function callGeminiResilient({ apiKey, models, prompt }) {
 
 function collectStaticIssues(workdir) {
   const issues = [];
+  const vitestCfgPath = existsSync(join(workdir, 'vitest.config.ts'))
+    ? join(workdir, 'vitest.config.ts')
+    : join(workdir, 'vitest.config.mts');
+  if (!existsSync(vitestCfgPath)) {
+    issues.push('Missing required file: vitest.config.ts (must configure jsdom and exclude e2e/**).');
+  } else if (!readFileSync(vitestCfgPath, 'utf8').includes('e2e')) {
+    issues.push('vitest.config.ts MUST exclude `e2e/**` so `vitest run` never executes Playwright specs.');
+  }
   const pwCfgPath = join(workdir, 'playwright.config.ts');
   const e2ePath = join(workdir, 'e2e/todomvc.spec.ts');
   if (!existsSync(pwCfgPath)) {
@@ -237,7 +252,7 @@ async function main() {
       '3. Accessibility & Ultra-Modern CSS: OKLCH + light-dark() design tokens, @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast (NEVER use text-slate-400 or text-gray-400 on light surfaces — use slate-600/700 for >=4.5:1 ratio and dark:text-slate-300 in dark mode), visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
       '',
       'REQUIRED files checklist:',
-      '- package.json (scripts: dev, typecheck: "tsc --noEmit", lint: "tsc --noEmit" or eslint v9 flat config, test: "vitest run", build: "tsc --noEmit && vite build", test:e2e: "playwright test")',
+      '- package.json (scripts: dev, typecheck: "tsc --noEmit", lint: "tsc --noEmit", test: "vitest run", build: "tsc --noEmit && vite build", test:e2e: "playwright test")',
       '- tsconfig.json (MUST have "noEmit": true so tsc never emits .js files into src/ or e2e/)',
       '- vite.config.ts (with base: process.env.VITE_BASE_PATH || "/")',
       '- vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"])',
