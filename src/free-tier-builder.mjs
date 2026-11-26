@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
  * Lean single-shot + surgical-repair builder for Free-Tier API limits (15 RPM / 250K TPM).
- * Generates structured JSON { "files": { "<path>": "<content>" } } in 1 request (~15K tokens)
- * instead of 20+ multi-turn CLI loops that exceed 250K TPM.
+ * Preserves on-disk progress across retries and rotates through healthy models on transient 503s.
  */
 
 import { execSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 
 const FORBIDDEN_PREFIXES = ['.github/', '.git/', 'node_modules/', 'dist/'];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Safely write generated files inside workdir, blocking path traversal and protected paths. */
 export function writeGeneratedFiles(workdir, filesMap) {
@@ -33,7 +33,18 @@ export function writeGeneratedFiles(workdir, filesMap) {
   return written;
 }
 
-async function callGeminiJson({ apiKey, model, prompt }) {
+function listProjectFiles(root, prefix = '') {
+  const out = [];
+  for (const entry of readdirSync(join(root, prefix), { withFileTypes: true })) {
+    if (['node_modules', 'dist', '.git'].includes(entry.name)) continue;
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...listProjectFiles(root, rel));
+    else out.push(rel);
+  }
+  return out;
+}
+
+async function callGeminiOnce({ apiKey, model, prompt }) {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: {
@@ -51,14 +62,36 @@ async function callGeminiJson({ apiKey, model, prompt }) {
   });
   const text = await res.text();
   if (!res.ok) {
-    const err = new Error(`Gemini HTTP ${res.status}: ${text.slice(0, 400)}`);
+    const err = new Error(`Gemini HTTP ${res.status} (${model}): ${text.slice(0, 300)}`);
     err.status = res.status;
     throw err;
   }
   const payload = JSON.parse(text);
   const raw = payload.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!raw) throw new Error('Gemini returned empty candidate content');
+  if (!raw) throw new Error(`Gemini (${model}) returned empty candidate content`);
   return JSON.parse(raw);
+}
+
+/** Call Gemini rotating across candidate models and backing off cleanly on 429/503. */
+async function callGeminiResilient({ apiKey, models, prompt }) {
+  let lastErr;
+  for (const backoffSec of [0, 15, 35]) {
+    if (backoffSec > 0) {
+      console.error(`[mogra-oneshot] cooling down ${backoffSec}s before next model pass...`);
+      await sleep(backoffSec * 1000);
+    }
+    for (const model of models) {
+      try {
+        console.log(`[mogra-oneshot] calling model='${model}'...`);
+        return await callGeminiOnce({ apiKey, model, prompt });
+      } catch (err) {
+        lastErr = err;
+        console.error(`[mogra-oneshot] ${err.message}`);
+        if (err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function runLocalChecks(workdir) {
@@ -82,40 +115,49 @@ async function main() {
     }, []),
   );
   const workdir = resolve(args.workdir ?? '.');
-  const model = args.model ?? 'gemini-3.1-flash-lite';
+  const primaryModel = args.model ?? 'gemini-3.1-flash-lite';
+  const envCandidates = (process.env.MOGRA_CANDIDATES ?? '').split(/\s+/).filter(Boolean);
+  const models = [...new Set([primaryModel, ...envCandidates])];
   const promptText = readFileSync(args['prompt-file'], 'utf8');
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is required');
 
-  const initialPrompt = [
-    promptText,
-    '',
-    '## Output Format (STRICT JSON)',
-    'Return ONLY a JSON object with shape: { "files": { "<relative-path>": "<full-file-content>" } }.',
-    'Generate all files needed in the working directory: package.json, package-lock.json is optional, tsconfig.json, vite.config.ts, vitest.config.ts (excluding e2e/**), playwright.config.ts, index.html, src/*, and e2e/todomvc.spec.ts.',
-    'Keep code clean, accessible (WCAG 2.2 AA+, 320px zero-overflow reflow), and complete.',
-  ].join('\n');
+  if (!existsSync(join(workdir, 'package.json'))) {
+    const initialPrompt = [
+      promptText,
+      '',
+      '## Output Format (STRICT JSON)',
+      'Return ONLY a JSON object with shape: { "files": { "<relative-path>": "<full-file-content>" } }.',
+      'Generate all files needed in the working directory: package.json, tsconfig.json, vite.config.ts, vitest.config.ts (excluding e2e/**), playwright.config.ts, index.html, src/*, and e2e/todomvc.spec.ts.',
+      'Ensure EVERY package imported in vite.config.ts, vitest.config.ts, playwright.config.ts, src/*, or e2e/* is declared in package.json dependencies or devDependencies.',
+      'Keep code clean, accessible (WCAG 2.2 AA+, 320px zero-overflow reflow), and complete.',
+    ].join('\n');
 
-  console.log(`[mogra-oneshot] Generating files via model='${model}'...`);
-  const first = await callGeminiJson({ apiKey, model, prompt: initialPrompt });
-  const files = writeGeneratedFiles(workdir, first.files);
-  console.log(`[mogra-oneshot] Wrote ${files.length} files.`);
+    const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt });
+    const files = writeGeneratedFiles(workdir, first.files);
+    console.log(`[mogra-oneshot] Wrote ${files.length} files.`);
+  }
 
-  for (let round = 1; round <= 2; round++) {
+  for (let round = 1; round <= 3; round++) {
     const check = runLocalChecks(workdir);
     if (check.ok) {
       console.log(`[mogra-oneshot] Local typecheck, unit tests, and build passed.`);
       return;
     }
+    const existingFiles = listProjectFiles(workdir);
     console.error(`[mogra-oneshot] Check failed (round ${round}); requesting surgical repair:\n${check.output}`);
+    const pkgJson = existsSync(join(workdir, 'package.json'))
+      ? readFileSync(join(workdir, 'package.json'), 'utf8')
+      : '';
     const repairPrompt = [
-      `Fix ONLY the failing files in ${files.join(', ')} based on this build/test error:`,
+      `Fix ONLY the failing files among [${existingFiles.join(', ')}] based on this error:`,
       '```',
       check.output,
       '```',
+      pkgJson ? `Current package.json:\n\`\`\`json\n${pkgJson}\n\`\`\`` : '',
       'Return ONLY JSON: { "files": { "<relative-path>": "<updated-full-content>" } }.',
     ].join('\n');
-    const patched = await callGeminiJson({ apiKey, model, prompt: repairPrompt });
+    const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt });
     const updated = writeGeneratedFiles(workdir, patched.files);
     console.log(`[mogra-oneshot] Patched ${updated.length} files.`);
   }

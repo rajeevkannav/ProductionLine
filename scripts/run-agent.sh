@@ -87,27 +87,9 @@ run_free_tier_oneshot() {
 
 run_free_tier_gemini_loop() {
   mapfile -t FLASH_MODELS < <(discover_flash_models)
-  echo "[mogra] Free-Tier candidates (cooldown=${RETRY_WAIT}s): ${FLASH_MODELS[*]:-none}" >&2
-
-  for candidate in "${FLASH_MODELS[@]}"; do
-    for attempt in 1 2; do
-      http_code=$(probe_gemini_model "$candidate")
-      echo "[mogra] model='${candidate}' attempt=${attempt} probe=${http_code}" >&2
-      if [ "$http_code" != "200" ]; then
-        if [ "$attempt" -eq 1 ] && { [ "$http_code" = "429" ] || [ "$http_code" = "503" ]; }; then
-          sleep "$RETRY_WAIT"
-          continue
-        fi
-        break
-      fi
-      if run_free_tier_oneshot "$candidate"; then
-        return 0
-      fi
-      echo "[mogra] cooling down ${RETRY_WAIT}s before retrying '${candidate}'..." >&2
-      sleep "$RETRY_WAIT"
-    done
-  done
-  return 1
+  echo "[mogra] Free-Tier candidates: ${FLASH_MODELS[*]:-none}" >&2
+  export MOGRA_CANDIDATES="${FLASH_MODELS[*]:-}"
+  run_free_tier_oneshot "${FLASH_MODELS[0]:-$MODEL}"
 }
 
 mkdir -p "${SPOKE_DIR}/stacks/${STACK}"
