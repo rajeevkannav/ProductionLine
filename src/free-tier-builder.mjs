@@ -137,24 +137,34 @@ function collectStaticIssues(workdir) {
   return issues;
 }
 
+function compactErrorOutput(raw) {
+  const clean = raw
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .replace(/<svg[\s\S]*?<\/svg>/g, '<svg />')
+    .trim();
+  if (clean.length <= 5000) return clean;
+  return `${clean.slice(0, 2500)}\n...\n${clean.slice(-2500)}`;
+}
+
 function runLocalChecks(workdir) {
   const issues = collectStaticIssues(workdir);
+  const checkEnv = { ...process.env, DEBUG_PRINT_LIMIT: '800' };
   try {
     execSync(
-      'npm install --no-audit --no-fund && npm run typecheck --if-present && npm run lint --if-present && npm test --if-present && npm run build',
-      { cwd: workdir, encoding: 'utf8', stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 },
+      'npm install --no-audit --no-fund --loglevel=error && npm run typecheck --if-present && npm run lint --if-present && npm test --if-present && npm run build',
+      { cwd: workdir, env: checkEnv, encoding: 'utf8', stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 },
     );
     if (existsSync(join(workdir, 'playwright.config.ts')) && existsSync(join(workdir, 'e2e/todomvc.spec.ts'))) {
       execSync('npx playwright test --list && npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler --skipLibCheck e2e/*.ts', {
         cwd: workdir,
+        env: checkEnv,
         encoding: 'utf8',
         stdio: 'pipe',
         maxBuffer: 5 * 1024 * 1024,
       });
     }
   } catch (err) {
-    const clean = `${err.stdout ?? ''}\n${err.stderr ?? ''}`.replace(/\x1b\[[0-9;]*m/g, '').trim();
-    issues.push(clean.slice(-4000));
+    issues.push(compactErrorOutput(`${err.stdout ?? ''}\n${err.stderr ?? ''}`));
   }
   return issues.length === 0 ? { ok: true, output: '' } : { ok: false, output: issues.join('\n\n').slice(-5500) };
 }
