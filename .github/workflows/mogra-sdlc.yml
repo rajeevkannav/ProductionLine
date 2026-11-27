@@ -168,6 +168,7 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           REPO_NAME: ${{ github.event.repository.name }}
+          DEPLOY_TARGET: ${{ needs.intake.outputs.deploy_target }}
         run: |
           BRANCH="mogra/issue-${ISSUE_NUMBER}-${STACK}"
           if git -C spoke ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
@@ -183,7 +184,7 @@ jobs:
           } > /tmp/issue-spec.md
 
           if [ "$STACK" = "rails8-pg-hotwire" ] && [ ! -f spoke/config/application.rb ]; then
-            bash control-plane/scripts/bootstrap-rails.sh spoke "${REPO_NAME}"
+            bash control-plane/scripts/bootstrap-rails.sh spoke "${REPO_NAME}" "${DEPLOY_TARGET}"
           fi
 
           if [ "$DELIVERY_MODE" = "greenfield-stack" ] && [ -f "spoke/stacks/${STACK}/package.json" ]; then
@@ -393,6 +394,9 @@ jobs:
           for f in Gemfile bin/rails config/application.rb; do
             [ -f "$f" ] || { echo "::error::Not a Rails application: missing $f"; exit 1; }
           done
+          if [ -f render.yaml ] && [ ! -x bin/render-build.sh ]; then
+            echo "::error::bin/render-build.sh must exist and be executable (Render buildCommand)"; exit 1
+          fi
           if [ -f package.json ]; then
             if [ -f yarn.lock ]; then
               command -v yarn >/dev/null 2>&1 || npm install -g yarn@1

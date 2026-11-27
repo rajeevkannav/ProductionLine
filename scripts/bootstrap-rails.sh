@@ -3,11 +3,13 @@
 # Runs `rails new` instead of asking the LLM to hand-write framework files; the
 # builder agent then layers the issue's changes on top.
 #
-# Usage: bootstrap-rails.sh <spoke-dir> <app-name>
+# Usage: bootstrap-rails.sh <spoke-dir> <app-name> [deploy-target]
 set -euo pipefail
 
 SPOKE_DIR="${1:?spoke dir required}"
 APP_NAME="${2:?app name required}"
+DEPLOY_TARGET="${3:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cd "$SPOKE_DIR"
 
@@ -35,6 +37,12 @@ rails new . \
   --skip
 
 bundle lock --add-platform x86_64-linux >/dev/null
+
+# Render free Postgres gives one DATABASE_URL: run Solid Cache/Queue/Cable on the primary database.
+if [ "$DEPLOY_TARGET" = "render" ]; then
+  ruby "$SCRIPT_DIR/rails-single-db.rb" .
+  bundle exec rubocop -A db/migrate --format quiet || true
+fi
 
 for f in bin/rails config/application.rb Gemfile.lock package.json yarn.lock; do
   [ -e "$f" ] || { echo "[mogra] bootstrap failed: missing $f" >&2; exit 1; }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -293,4 +293,18 @@ test('incremental builder rejects empty test runs and model-written lockfiles', 
     'app/models/user.rb': 'class User; end',
   });
   assert.deepEqual(Object.keys(kept).sort(), ['Gemfile', 'app/models/user.rb']);
+});
+
+test('generated scripts are written executable', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mogra-exec-'));
+  try {
+    writeGeneratedFiles(dir, {
+      'bin/render-build.sh': '#!/usr/bin/env bash\nset -o errexit\n',
+      'app/models/user.rb': 'class User; end\n',
+    });
+    assert.equal(statSync(join(dir, 'bin/render-build.sh')).mode & 0o111, 0o111);
+    assert.equal(statSync(join(dir, 'app/models/user.rb')).mode & 0o111, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

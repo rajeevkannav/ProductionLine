@@ -25,6 +25,8 @@ All notable changes to **ProductionLine (`mogra`)** are documented in this file.
 - Empty `rails8-pg-hotwire` repos are bootstrapped deterministically with `rails new` (`scripts/bootstrap-rails.sh`: PostgreSQL, esbuild, Tailwind, no Kamal/CI files) before the builder agent runs, instead of the model hand-writing framework files.
 - Rails builder checks and `verify-rails-pg` now fail when `bin/rails` / `config/application.rb` are missing or Minitest reports 0 runs (previously `rails test` outside an app printed `rails new` help and passed). The builder also runs bundler-audit, and yarn-based apps are audited for high-severity advisories.
 - Model output can no longer overwrite lockfiles (`Gemfile.lock`, `yarn.lock`, `package-lock.json`).
+- Rails spokes deploying to Render are bootstrapped for a single `DATABASE_URL` (`scripts/rails-single-db.rb`): Solid Cache/Queue/Cable tables move into a regular migration on the primary database instead of three extra databases the free plan lacks.
+- Generated `bin/*` and `*.sh` files are written executable, and `verify-rails-pg` fails before merge if `render.yaml` exists but `bin/render-build.sh` is not executable.
 - Ruby version comes from the spoke's `.ruby-version` (else latest 3.4) instead of a pinned 3.4.5 that ubuntu-26.04 runners lack.
 - Issue titles already in Conventional Commit form are used as-is for the commit and PR title (no `feat(<stack>): feat(core): ...`).
 

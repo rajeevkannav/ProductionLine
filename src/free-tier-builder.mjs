@@ -5,7 +5,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
 const FORBIDDEN_PREFIXES = ['.github/', '.git/', 'node_modules/', 'dist/'];
@@ -28,6 +28,8 @@ export function writeGeneratedFiles(workdir, filesMap) {
     }
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, content, 'utf8');
+    // Scripts must stay executable (e.g. Render's buildCommand ./bin/render-build.sh).
+    if (normalized.startsWith('bin/') || normalized.endsWith('.sh') || content.startsWith('#!')) chmodSync(target, 0o755);
     written.push(normalized);
   }
   return written;
