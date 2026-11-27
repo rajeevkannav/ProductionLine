@@ -133,6 +133,12 @@ jobs:
             git -C spoke checkout -B "$BRANCH" "origin/$BRANCH"
           else
             git -C spoke checkout -B "$BRANCH"
+            # `mogra:regenerate` (set alongside `mogra:run`) rebuilds an already-merged stack from scratch.
+            # Only on a fresh branch from main, so re-runs keep any progress already pushed to the issue branch.
+            if jq -e '[.issue.labels[].name] | index("mogra:regenerate")' "$GITHUB_EVENT_PATH" >/dev/null; then
+              echo "[mogra] mogra:regenerate set; removing stacks/${STACK} so the builder regenerates it from the current prompt."
+              rm -rf "spoke/stacks/${STACK}"
+            fi
           fi
           {
             echo "Title: ${ISSUE_TITLE}"
@@ -177,6 +183,10 @@ jobs:
             fi
           else
             PR_NUM=""
+          fi
+          if [ -n "$PR_NUM" ] && jq -e '[.issue.labels[].name] | index("mogra:regenerate")' "$GITHUB_EVENT_PATH" >/dev/null; then
+            # Regenerated code is now on the PR branch; clear the label so later runs never wipe it again.
+            gh issue edit "$ISSUE_NUMBER" -R "$REPO" --remove-label "mogra:regenerate" || true
           fi
           echo "pr_number=${PR_NUM}" >> "$GITHUB_OUTPUT"
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
