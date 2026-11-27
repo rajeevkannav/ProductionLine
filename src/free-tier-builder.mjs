@@ -220,7 +220,7 @@ function runLocalChecks(workdir) {
       { cwd: workdir, env: checkEnv, encoding: 'utf8', stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 },
     );
     if (existsSync(join(workdir, 'playwright.config.ts')) && existsSync(join(workdir, 'e2e/todomvc.spec.ts'))) {
-      execSync('npx playwright test --list && npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler --skipLibCheck e2e/*.ts', {
+      execSync('npx playwright test --list && npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler --skipLibCheck $(npx tsc -v | grep -qE "Version [6-9]" && echo "--ignoreConfig" || true) e2e/*.ts', {
         cwd: workdir,
         env: checkEnv,
         encoding: 'utf8',
