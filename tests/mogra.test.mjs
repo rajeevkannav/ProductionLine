@@ -215,7 +215,21 @@ function writeCompliantStack(dir) {
     'vitest.config.ts': 'export default { test: { environment: "jsdom", exclude: ["e2e/**"] } };',
     'vite.config.ts': 'export default { base: process.env.VITE_BASE_PATH || "/" };',
     'playwright.config.ts': 'export default { webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173", url: "http://127.0.0.1:4173" } };',
-    'e2e/todomvc.spec.ts': 'import AxeBuilder from "@axe-core/playwright";\ntest("a11y", async ({ page }) => { await page.setViewportSize({ width: 320, height: 640 }); await new AxeBuilder({ page }).analyze(); });',
+    'e2e/todomvc.spec.ts': [
+      'import AxeBuilder from "@axe-core/playwright";',
+      'test("a11y", async ({ page }) => { await new AxeBuilder({ page }).analyze(); });',
+      'test("reflow", async ({ page }) => { await page.setViewportSize({ width: 320, height: 640 }); });',
+      'test("crud", async ({ page }) => {});',
+      'test("persistence", async ({ page }) => { await page.reload(); });',
+    ].join('\n'),
+    'src/app.test.ts': ['add', 'toggle', 'edit', 'filter', 'undo'].map((name) => `it('${name}', () => {});`).join('\n'),
+    'src/features.ts': [
+      'const db = indexedDB.open("todos", 1); const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("todos") : null;',
+      'window.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {} if (e.key === "Escape") {} });',
+      'export const exportTodos = () => URL.createObjectURL(new Blob(["[]"], { type: "application/json" }));',
+      'export const importTodos = async (file: File) => JSON.parse(await file.text());',
+      'document.documentElement.setAttribute("data-theme", "dark");',
+    ].join('\n'),
     'src/main.ts': "import './styles.css';\nimport { mount } from './app';",
     'src/app.ts': [
       'const store = { undo() {}, filter: "active" as "all" | "active" | "completed" }; localStorage.getItem("todos");',
@@ -311,5 +325,27 @@ test('cross-stack UI light tokens match the react19-ts-vite QuantumBlack light t
   for (const [react19Token, sharedToken] of Object.entries(pairs)) {
     const value = css.match(new RegExp(`${react19Token}:\\s*([^;]+);`))?.[1];
     assert.equal(CROSS_STACK_UI.lightTokens[sharedToken], value, `${sharedToken} should equal react19 ${react19Token}`);
+  }
+});
+
+test('completeness gate rejects placeholder TodoMVC+ stubs', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mogra-stub-'));
+  try {
+    writeCompliantStack(dir);
+    rmSync(join(dir, 'src/features.ts'));
+    writeFileSync(join(dir, 'src/app.test.ts'), "it('renders the title', () => {});");
+    writeFileSync(join(dir, 'e2e/todomvc.spec.ts'), 'import AxeBuilder from "@axe-core/playwright";\ntest("a11y", async ({ page }) => { await page.setViewportSize({ width: 320, height: 600 }); await new AxeBuilder({ page }).analyze(); });');
+    writeFileSync(join(dir, 'src/toolbar.tsx'), 'export const Toolbar = () => (<><button onClick={() => alert("Undo")}>Undo</button><button onClick={() => {}}>Export</button></>);');
+    const issues = collectStaticIssues(dir).join('\n');
+    assert.match(issues, /stub detected/);
+    for (const feature of ['IndexedDB', 'BroadcastChannel', 'Ctrl/Cmd\\+Z', 'Escape', 'JSON Export', 'JSON Import', 'data-theme']) {
+      assert.match(issues, new RegExp(feature));
+    }
+    assert.match(issues, /remove `alert\(\)`/);
+    assert.match(issues, /empty `\(\) => \{\}` click handler/);
+    assert.match(issues, /Unit tests too shallow \(1 test case/);
+    assert.match(issues, /E2E suite too shallow \(1 test/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

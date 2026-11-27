@@ -320,6 +320,51 @@ export function collectStaticIssues(workdir) {
     issues.push('Accessibility error (axe landmark-one-main): wrap the main app content in a semantic `<main>` landmark element.');
   }
   issues.push(...collectCrossStackUiIssues(workdir, srcFiles, combinedSrc));
+  issues.push(...collectCompletenessIssues(workdir, srcFiles));
+  return issues;
+}
+
+/**
+ * Anti-stub gate: keyword presence alone let placeholder apps through (Undo wired to alert(),
+ * no-op Export/Import, single smoke tests). Require evidence that each power feature is implemented
+ * and that unit/E2E suites exercise more than a render smoke test.
+ */
+function collectCompletenessIssues(workdir, srcFiles) {
+  const issues = [];
+  const read = (f) => readFileSync(join(workdir, f), 'utf8');
+  const appSrc = srcFiles.filter((f) => !/\.(test|spec)\./.test(f)).map(read).join('\n');
+  const unitSrc = srcFiles.filter((f) => /\.(test|spec)\./.test(f)).map(read).join('\n');
+  const e2eSrc = listProjectFiles(workdir).filter((f) => f.startsWith('e2e/') && /\.ts$/.test(f)).map(read).join('\n');
+
+  const features = [
+    [/\bindexedDB\b/, 'versioned IndexedDB persistence (`indexedDB.open(...)` with an `onupgradeneeded` object store) plus the localStorage mirror'],
+    [/\bBroadcastChannel\b/, 'feature-detected BroadcastChannel multi-tab sync'],
+    [/\b(?:ctrlKey|metaKey)\b/, 'keyboard Undo/Redo shortcuts (Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z via `event.ctrlKey || event.metaKey`)'],
+    [/['"`]z['"`]/i, 'keyboard Undo/Redo shortcuts matching the `z` key'],
+    [/['"`]Escape['"`]/, 'Escape cancels inline edit'],
+    [/\bnew Blob\b|\bcreateObjectURL\b/, 'JSON Export that downloads a file (`new Blob([...], { type: "application/json" })` + `URL.createObjectURL`)'],
+    [/\bFileReader\b|\.text\(\)/, 'JSON Import that reads the chosen file (`await file.text()` or FileReader) and validates it before replacing todos'],
+    [/data-theme/, 'theme toggle that sets/removes `data-theme="dark"` on `document.documentElement`'],
+  ];
+  const missing = features.filter(([re]) => !re.test(appSrc)).map(([, label]) => label);
+  if (missing.length > 0) {
+    issues.push(`Incomplete TodoMVC+ app (stub detected): implement these required power features in src/ (non-test code): ${[...new Set(missing)].map((m) => `\n  - ${m}`).join('')}`);
+  }
+  if (/\b(?:alert|confirm|prompt)\s*\(/.test(appSrc)) {
+    issues.push('Placeholder UI detected: remove `alert()`/`confirm()`/`prompt()` calls from src/ and implement the real behaviour (Undo/Redo history, Export/Import, theme toggle).');
+  }
+  if (/(?:onClick|onclick|on:click|@click|\(click\))\s*=\s*[{"']\s*\(\)\s*=>\s*\{\s*\}/.test(appSrc)) {
+    issues.push('Placeholder UI detected: a button has an empty `() => {}` click handler. Wire every toolbar button (Undo, Redo, Export, Import, theme toggle) to real behaviour.');
+  }
+
+  const unitCases = (unitSrc.match(/\b(?:it|test)\s*\(\s*['"`]/g) ?? []).length;
+  if (unitCases < 5) {
+    issues.push(`Unit tests too shallow (${unitCases} test case(s)): add at least 5 Vitest cases under src/ covering add/trim, toggle & toggle-all, inline edit/delete, filters + Clear Completed, Undo/Redo, and rejection of malformed / prototype-polluting JSON import.`);
+  }
+  const e2eCases = (e2eSrc.match(/\btest\s*\(\s*['"`]/g) ?? []).length;
+  if (e2eCases < 4 || !/page\.reload\s*\(/.test(e2eSrc)) {
+    issues.push(`E2E suite too shallow (${e2eCases} test(s)): e2e/todomvc.spec.ts needs at least 4 Playwright tests including CRUD (add, toggle, edit, delete), filters, reload persistence (\`await page.reload()\` after waiting for the item), Undo/Redo, axe zero violations, and the 320px reflow check.`);
+  }
   return issues;
 }
 
