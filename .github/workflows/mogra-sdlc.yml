@@ -232,6 +232,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.discover-spec-build.outputs.pr_number }}
           STACK: ${{ needs.intake.outputs.stack }}
+          NG_CLI_ANALYTICS: "false"
         run: |
           APP_DIR="spoke/stacks/${STACK}"
           [ -f "${APP_DIR}/package.json" ] || APP_DIR="spoke"
@@ -307,6 +308,7 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
           CONTROL_PLANE_REPO: ${{ inputs.control_plane_repo }}
+          NG_CLI_ANALYTICS: "false"
         run: |
           mkdir -p pages-dist
           ROOT_BASE="/${REPO_NAME}/"

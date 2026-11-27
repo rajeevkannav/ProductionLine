@@ -213,18 +213,19 @@ let pwInstalled = false;
 
 function runLocalChecks(workdir) {
   const issues = collectStaticIssues(workdir);
-  const checkEnv = { ...process.env, DEBUG_PRINT_LIMIT: '800', CI: process.env.CI || 'true' };
+  const checkEnv = { ...process.env, DEBUG_PRINT_LIMIT: '800', CI: process.env.CI || 'true', NG_CLI_ANALYTICS: 'false' };
   try {
     execSync(
       'npm install --no-audit --no-fund --loglevel=error && npm run typecheck --if-present && npm run lint --if-present && npm test --if-present && npm run build && npm audit --omit=dev --audit-level=high',
-      { cwd: workdir, env: checkEnv, encoding: 'utf8', stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 },
+      { cwd: workdir, env: checkEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180_000, maxBuffer: 10 * 1024 * 1024 },
     );
     if (existsSync(join(workdir, 'playwright.config.ts')) && existsSync(join(workdir, 'e2e/todomvc.spec.ts'))) {
       execSync('npx playwright test --list && npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler --skipLibCheck $(npx tsc -v | grep -qE "Version [6-9]" && echo "--ignoreConfig" || true) e2e/*.ts', {
         cwd: workdir,
         env: checkEnv,
         encoding: 'utf8',
-        stdio: 'pipe',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 60_000,
         maxBuffer: 5 * 1024 * 1024,
       });
       if (issues.length === 0) {
@@ -234,7 +235,8 @@ function runLocalChecks(workdir) {
             cwd: workdir,
             env: checkEnv,
             encoding: 'utf8',
-            stdio: 'pipe',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 180_000,
             maxBuffer: 10 * 1024 * 1024,
           });
           pwInstalled = true;
@@ -363,6 +365,9 @@ async function main() {
     }
     if (check.output.includes('TS5096')) {
       hints.push('CRITICAL TS5096: Remove `"allowImportingTsExtensions"` from `tsconfig.json` and `tsconfig.app.json`!');
+    }
+    if (check.output.includes('TS5101') || check.output.includes('TS5090')) {
+      hints.push('CRITICAL TS5101/TS5090 (TypeScript 6): Remove `"baseUrl"` and `"paths"` from `tsconfig.json` and `tsconfig.app.json` completely; use relative imports `./...`.');
     }
     const repairPrompt = [
       `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve ALL errors shown below:`,
