@@ -309,7 +309,7 @@ async function main() {
       '- tsconfig.json (MUST have "noEmit": true so tsc never emits .js files into src/ or e2e/; NEVER set "allowImportingTsExtensions": true)',
       '- vite.config.ts (with base: process.env.VITE_BASE_PATH || "/")',
       '- vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"])',
-      '- playwright.config.ts (testDir:"./e2e", timeout: 30000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" (or "--host 127.0.0.1 --port 4173" for Angular), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env.CI, timeout: 60000 }, use: { baseURL: "http://127.0.0.1:4173" })',
+      '- playwright.config.ts (testDir:"./e2e", timeout: 30000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" for Vite OR "npx ng serve --host 127.0.0.1 --port 4173" for Angular (NEVER pass --strictPort to ng serve!), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env.CI, timeout: 60000 }, use: { baseURL: "http://127.0.0.1:4173" })',
       '- index.html',
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
       '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import; ALWAYS scope item presence/removal checks inside the list via `within(screen.getByRole(\'list\'))` and NEVER assert on or `waitForElementToBeRemoved` the `role="status"` live announcer)',
@@ -371,6 +371,9 @@ async function main() {
     }
     if (check.output.includes('@angular/animations')) {
       hints.push('CRITICAL missing package: Add `"@angular/animations": "^22.0.0"` to `dependencies` in `package.json`.');
+    }
+    if (check.output.includes('strictPort')) {
+      hints.push('CRITICAL Playwright WebServer error: Angular `ng serve` does NOT accept `--strictPort`. Remove `--strictPort` from `playwright.config.ts` (`webServer.command: "npx ng serve --host 127.0.0.1 --port 4173"`).');
     }
     const repairPrompt = [
       `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve ALL errors shown below:`,
