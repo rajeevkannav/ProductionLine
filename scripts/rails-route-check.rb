@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
-# Fails when an application route points at a missing controller or action
-# (no action method and no template for implicit rendering). Run inside the app:
+# Fails when an application route points at a missing controller (Rails raises
+# a 500-class routing error). Routes whose action is missing only 404, so they are
+# reported as warnings (Rails' own generators emit e.g. resources :passwords with
+# only new/create/edit/update implemented). Run inside the app:
 #   bin/rails runner path/to/rails-route-check.rb
 problems = []
+warnings = []
 Rails.application.reload_routes!
 Rails.application.routes.routes.each do |route|
   controller = route.defaults[:controller]
@@ -20,11 +23,12 @@ Rails.application.routes.routes.each do |route|
   next if klass.action_methods.include?(action)
   next if klass.new.send(:template_exists?, action, klass.controller_path)
 
-  problems << "#{route.verb} #{route.path.spec}: #{klass} has no '#{action}' action or app/views/#{controller}/#{action} template"
+  warnings << "#{route.verb} #{route.path.spec}: #{klass} has no '#{action}' action (404)"
 end
 
+warn "[mogra] Route check warnings:\n  #{warnings.uniq.join("\n  ")}" if warnings.any?
 if problems.any?
-  warn "Routes without a controller action:\n  #{problems.uniq.join("\n  ")}"
+  warn "Routes without a controller:\n  #{problems.uniq.join("\n  ")}"
   exit 1
 end
-puts "[mogra] Route check: every route has a controller action."
+puts "[mogra] Route check: every route has a controller."

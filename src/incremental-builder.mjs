@@ -5,7 +5,7 @@
  * and runs stack-specific local verification + repair loops.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -216,6 +216,78 @@ function runStackChecks(workdir, stack) {
   }
 }
 
+const GENERATORS = new Set(['authentication', 'model', 'migration', 'controller', 'mailer', 'job', 'channel', 'stimulus']);
+const GENERATOR_FLAGS = new Set(['--force', '--skip', '--skip-collision-check', '--api', '--no-test-framework']);
+const GENERATOR_ARG = /^[A-Za-z0-9_:!.\/=\-]+$/;
+
+/**
+ * Parse the issue's `### Generators` section into allowlisted `rails generate` argument lists.
+ * Lines look like `bin/rails generate authentication` or `- rails g model Project name:string`.
+ */
+export function parseGenerators(spec = '') {
+  const section = String(spec).match(/^###\s*Generators\s*\n([\s\S]*?)(?=^#{1,6}\s|(?![\s\S]))/m)?.[1] ?? '';
+  const commands = [];
+  for (const raw of section.split('\n')) {
+    if (/^\s*(`{3}|~{3})/.test(raw)) continue; // issue-form code fences
+    const line = raw.replace(/`/g, '').replace(/^\s*[-*]\s*/, '').trim();
+    if (!line || /^_?no response_?$/i.test(line)) continue;
+    const match = line.match(/^(?:bin\/)?rails\s+(?:generate|g)\s+(.+)$/);
+    if (!match) throw new Error(`Generators: unsupported line '${line}' (expected 'bin/rails generate <generator> ...')`);
+    const args = match[1].split(/\s+/);
+    if (!GENERATORS.has(args[0])) throw new Error(`Generators: '${args[0]}' is not allowed (allowed: ${[...GENERATORS].join(', ')})`);
+    for (const arg of args.slice(1)) {
+      if (arg.startsWith('--') ? !GENERATOR_FLAGS.has(arg) : !GENERATOR_ARG.test(arg)) {
+        throw new Error(`Generators: argument '${arg}' is not allowed`);
+      }
+    }
+    commands.push(args);
+  }
+  return commands;
+}
+
+function createdTables(source) {
+  return [...String(source).matchAll(/create_table\s*\(?\s*[:"']([a-z0-9_]+)/g)].map((m) => m[1]);
+}
+
+function existingTables(workdir) {
+  const tables = new Set();
+  const schema = join(workdir, 'db', 'schema.rb');
+  if (existsSync(schema)) createdTables(readFileSync(schema, 'utf8')).forEach((t) => tables.add(t));
+  const migrate = join(workdir, 'db', 'migrate');
+  if (existsSync(migrate)) {
+    for (const f of readdirSync(migrate)) createdTables(readFileSync(join(migrate, f), 'utf8')).forEach((t) => tables.add(t));
+  }
+  return tables;
+}
+
+/** Run the issue's allowlisted Rails generators before the model; drop generated migrations for tables that already exist. */
+export function runGenerators(workdir, commands) {
+  if (commands.length === 0) return [];
+  runCommand('bundle config set --local deployment false && bundle config set --local frozen false', workdir);
+  const before = new Set(existsSync(join(workdir, 'db/migrate')) ? readdirSync(join(workdir, 'db/migrate')) : []);
+  const tables = existingTables(workdir);
+  for (const args of commands) {
+    console.log(`[mogra-incremental] rails generate ${args.join(' ')}`);
+    execFileSync('bundle', ['exec', 'rails', 'generate', ...args], {
+      cwd: workdir,
+      env: { ...process.env, CI: 'true', RAILS_ENV: 'development' },
+      stdio: ['ignore', 'inherit', 'inherit'],
+      timeout: 300_000,
+    });
+  }
+  const migrate = join(workdir, 'db/migrate');
+  for (const f of existsSync(migrate) ? readdirSync(migrate) : []) {
+    if (before.has(f)) continue;
+    const created = createdTables(readFileSync(join(migrate, f), 'utf8'));
+    if (created.length > 0 && created.every((t) => tables.has(t))) {
+      rmSync(join(migrate, f));
+      console.log(`[mogra-incremental] Dropped generated migration ${f}: tables ${created.join(', ')} already exist.`);
+    }
+  }
+  const status = execSync('git status --porcelain --untracked-files=all', { cwd: workdir, encoding: 'utf8' });
+  return status.split('\n').filter(Boolean).map((l) => l.slice(3).trim());
+}
+
 function checkChange(workdir, stack, changed) {
   const result = runStackChecks(workdir, stack);
   if (!result.ok) return result;
@@ -245,6 +317,10 @@ async function main() {
   if (!apiKey) throw new Error('GEMINI_API_KEY is required');
 
   const telemetry = [];
+  const changed = new Set();
+  const generators = stack === 'rails8-pg-hotwire' ? parseGenerators(promptText) : [];
+  const generated = runGenerators(workdir, generators);
+  generated.forEach((p) => changed.add(p));
   const ctx = buildRepoContext(workdir);
 
   const initialPrompt = [
@@ -254,6 +330,13 @@ async function main() {
     `- Stack: ${stack}`,
     `- Mode: incremental-feature (extend existing repository cleanly; preserve existing features and passing tests)`,
     '',
+    ...(generators.length
+      ? [
+          '## Generators Already Run',
+          `mogra already ran: ${generators.map((g) => `bin/rails generate ${g.join(' ')}`).join('; ')}. Their files are in the tree below and are known to work: extend or adjust them, do not re-create or replace them.`,
+          '',
+        ]
+      : []),
     '## Current Repository Tree',
     '```',
     ctx.tree,
@@ -276,7 +359,6 @@ async function main() {
   ].join('\n');
 
   const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt, phase: 'incremental-build', telemetry });
-  const changed = new Set();
   const written = writeGeneratedFiles(workdir, mergeGemfile(withoutLockfiles(first.files), workdir));
   written.forEach((p) => changed.add(p));
   deleteGeneratedFiles(workdir, first.deletes);

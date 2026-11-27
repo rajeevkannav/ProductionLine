@@ -10,7 +10,7 @@ import { formatEvidenceLedger } from '../src/evidence.mjs';
 import { writeGeneratedFiles, writeRunMetrics } from '../src/free-tier-builder.mjs';
 import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
-import { countMinitestRuns, mergeGemfile, missingTestChanges, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
+import { countMinitestRuns, mergeGemfile, missingTestChanges, parseGenerators, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
 import { generateShowcasePortal } from '../src/pages-portal.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -410,4 +410,17 @@ test('Rails route check script ships with the control plane', () => {
   assert.match(script, /constantize/);
   assert.match(script, /template_exists\?/);
   assert.match(readFileSync(join(ROOT, 'src/incremental-builder.mjs'), 'utf8'), /rails runner/);
+});
+
+test('issue Generators section is parsed against an allowlist', () => {
+  const spec = '### Outcome\nx\n\n### Generators\n\n```text\nbin/rails generate authentication --force\n- `rails g model Project name:string! account:references`\n```\n\n## Skills\nignored';
+  assert.deepEqual(parseGenerators(spec), [
+    ['authentication', '--force'],
+    ['model', 'Project', 'name:string!', 'account:references'],
+  ]);
+  assert.deepEqual(parseGenerators('### Generators\n\n_No response_\n\n### Notes'), []);
+  assert.deepEqual(parseGenerators('### Outcome\nno generators'), []);
+  assert.throws(() => parseGenerators('### Generators\nbin/rails generate scaffold Post'), /not allowed/);
+  assert.throws(() => parseGenerators('### Generators\nbin/rails generate model Post; rm -rf /'), /not allowed/);
+  assert.throws(() => parseGenerators('### Generators\nbin/rails db:drop'), /unsupported line/);
 });

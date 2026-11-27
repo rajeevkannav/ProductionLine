@@ -1,5 +1,5 @@
 name: Feature (mogra)
-description: Request a feature. ProductionLine (mogra) will spec, build, verify, and deploy it to Render.
+description: Request a feature. ProductionLine (mogra) will spec, build, verify, and deploy it to Railway.
 title: "feat(scope): "
 labels: ["mogra:intake"]
 body:
@@ -37,6 +37,15 @@ body:
     validations:
       required: true
   - type: textarea
+    id: generators
+    attributes:
+      label: Generators
+      description: "Optional. Rails generators mogra runs before the model, one per line (allowed: authentication, model, migration, controller, mailer, job, channel, stimulus)."
+      placeholder: |
+        bin/rails generate authentication
+        bin/rails generate model Project name:string account:references
+      render: text
+  - type: textarea
     id: acceptance
     attributes:
       label: Acceptance Criteria
@@ -45,7 +54,7 @@ body:
         - [ ] Tenant isolation: Account A cannot read or write Account B records
         - [ ] Brakeman, bundler-audit, Gitleaks clean
         - [ ] WCAG 2.2 AA (axe zero violations) and 320px zero-overflow on touched pages
-        - [ ] Deploys to Render and /up returns 200
+        - [ ] Deploys to Railway and /up returns 200
     validations:
       required: true
   - type: textarea

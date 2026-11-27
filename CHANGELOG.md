@@ -13,6 +13,7 @@ All notable changes to **ProductionLine (`mogra`)** are documented in this file.
 - Per-profile verify jobs in `mogra-sdlc.yml`: `verify-node-spa`, `verify-rails-pg` (Postgres service, Brakeman, bundle-audit, CycloneDX Ruby SBOM), `verify-android-apk` (debug APK artifact), `verify-ios-xcode` (macOS runner).
 - Issue routing from `android`/`ios` (`mobile:*`) labels and `feat(android)`/`feat(ios)` title prefixes; `plan-agent --stack` picks the stack's default agent.
 - `deployment.target: railway` (Railway free plan + Neon free Postgres, no credit card, never billable): `deployment.railway.{health_path,service_name}`, `RAILWAY_APP_URL` health polling in the deploy job, `railway.toml` written by the Rails bootstrap (Dockerfile build, `/up` health check, sleep when idle), and the `railway-neon-free-tier-ops` skill.
+- Rails issues can list allowlisted generators under `### Generators` (`authentication`, `model`, `migration`, `controller`, `mailer`, `job`, `channel`, `stimulus`; arguments validated, no shell). mogra runs them before the model, drops generated migrations for tables that already exist, and tells the model to extend the generated files. The spoke-rails feature template gains a Generators field. The route check fails only on missing controllers; missing actions (404) are warnings.
 - `templates/spoke-rails/`: Rails 8 spoke template (`.mogra.yaml`, workflow caller, CodeQL, Dependabot, issue templates), defaulting to Railway + Neon, with a setup guide covering secrets, repo settings, Neon/Railway, and mobile clients.
 
 ### Changed
