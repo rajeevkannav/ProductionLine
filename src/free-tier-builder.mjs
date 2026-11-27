@@ -197,6 +197,14 @@ function collectStaticIssues(workdir) {
   if (!/active/i.test(combinedSrc) || !/completed/i.test(combinedSrc) || !/(indexedDB|localStorage)/.test(combinedSrc) || !/undo/i.test(combinedSrc)) {
     issues.push('Incomplete TodoMVC+ app in src/: must include filters (All/Active/Completed), persistent IndexedDB/localStorage storage, and Undo/Redo support (not a bare add-only toy).');
   }
+  const indexHtml = existsSync(join(workdir, 'src/index.html'))
+    ? readFileSync(join(workdir, 'src/index.html'), 'utf8')
+    : existsSync(join(workdir, 'index.html'))
+      ? readFileSync(join(workdir, 'index.html'), 'utf8')
+      : '';
+  if (!/<main\b/i.test(combinedSrc) && !/<main\b/i.test(indexHtml)) {
+    issues.push('Accessibility error (axe landmark-one-main): wrap the main app content in a semantic `<main>` landmark element.');
+  }
   return issues;
 }
 
@@ -306,7 +314,7 @@ async function main() {
       '',
       'REQUIRED files checklist:',
       '- package.json (scripts: dev, typecheck: "tsc --noEmit", lint: "tsc --noEmit", test: "vitest run", build: "tsc --noEmit && vite build", test:e2e: "playwright test")',
-      '- tsconfig.json (MUST have "noEmit": true so tsc never emits .js files into src/ or e2e/; NEVER set "allowImportingTsExtensions": true)',
+      '- tsconfig.json (MUST have "noEmit": true, "moduleResolution": "bundler", "skipLibCheck": true, and NEVER set "allowImportingTsExtensions": true or "baseUrl")',
       '- vite.config.ts (with base: process.env.VITE_BASE_PATH || "/")',
       '- vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"])',
       '- playwright.config.ts (testDir:"./e2e", timeout: 30000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" for Vite OR "npx ng serve --host 127.0.0.1 --port 4173" for Angular (NEVER pass --strictPort to ng serve!), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env.CI, timeout: 60000 }, use: { baseURL: "http://127.0.0.1:4173" })',
@@ -314,7 +322,7 @@ async function main() {
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
       '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import; ALWAYS scope item presence/removal checks inside the list via `within(screen.getByRole(\'list\'))` and NEVER assert on or `waitForElementToBeRemoved` the `role="status"` live announcer)',
       '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence — ALWAYS assert `toBeVisible()` and `await page.waitForTimeout(150)` BEFORE calling `await page.reload()`, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — pass `{ exact: true }` to EVERY `getByText(..., { exact: true })` AND `getByRole(..., { name: ..., exact: true })`, and scope checkbox assertions by row/listitem when toggling changes its aria-label)',
-      'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json with compatible peer versions (for angular-ts: NEVER use `@angular/*` 19.x and NEVER add `@angular-eslint/*` or `@testing-library/angular` — use ONLY dependencies `"@angular/animations": "^22.0.0"`, `"@angular/core": "^22.0.0"`, `"@angular/common": "^22.0.0"`, `"@angular/forms": "^22.0.0"`, `"@angular/platform-browser": "^22.0.0"`, `"@angular/compiler": "^22.0.0"`, `"@angular/cdk": "^22.0.0"`, `"rxjs": "^7.8.0"`, `"tslib": "^2.6.0"`, `"zone.js": "~0.16.0"` and devDependencies `"@angular-devkit/build-angular": "^22.0.0"`, `"@angular/cli": "^22.0.0"`, `"@angular/compiler-cli": "^22.0.0"`, `"typescript": "~6.0.0"`, `"vitest": "^2.1.0"`, `"jsdom": "^26.0.0"`, `"@playwright/test": "^1.50.0"`, `"@axe-core/playwright": "^4.10.0"`; ALWAYS include a valid root `angular.json` with `"version": 1` and `"projects": { "app": { "projectType": "application", "root": "", "sourceRoot": "src", "architect": { "build": { "builder": "@angular-devkit/build-angular:application", "options": { "outputPath": "dist", "index": "src/index.html", "browser": "src/main.ts", "tsConfig": "tsconfig.app.json", "styles": ["src/styles.css"] } }, "serve": { "builder": "@angular-devkit/build-angular:dev-server", "options": { "buildTarget": "app:build" } } } } }`; put all TodoMVC+ CRUD/filter/undo/persistence logic in a pure TypeScript class `src/app/todo.store.ts` with ZERO `effect()` calls in constructors, NEVER import `TestBed` or `@testing-library/angular` in Vitest `*.spec.ts` — unit test `src/app/todo.store.ts` directly and test rendered UI in `e2e/todomvc.spec.ts` — and import `CommonModule` strictly from `@angular/common`), and `npm audit --omit=dev --audit-level=high` passes cleanly (use zero-dependency runtime TypeScript validation instead of vulnerable `zod <4.6.7`).',
+      'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json with compatible peer versions (for angular-ts: NEVER use `@angular/*` 19.x and NEVER add `@angular-eslint/*` or `@testing-library/angular` — use ONLY dependencies `"@angular/animations": "^22.0.0"`, `"@angular/core": "^22.0.0"`, `"@angular/common": "^22.0.0"`, `"@angular/forms": "^22.0.0"`, `"@angular/platform-browser": "^22.0.0"`, `"@angular/compiler": "^22.0.0"`, `"@angular/cdk": "^22.0.0"`, `"rxjs": "^7.8.0"`, `"tslib": "^2.6.0"`, `"zone.js": "~0.16.0"` and devDependencies `"@angular-devkit/build-angular": "^22.0.0"`, `"@angular/cli": "^22.0.0"`, `"@angular/compiler-cli": "^22.0.0"`, `"typescript": "~6.0.0"`, `"vitest": "^2.1.0"`, `"jsdom": "^26.0.0"`, `"@playwright/test": "^1.50.0"`, `"@axe-core/playwright": "^4.10.0"`; ALWAYS include `tsconfig.app.json` + a valid root `angular.json` with `"version": 1` and `"projects": { "app": { "projectType": "application", "root": "", "sourceRoot": "src", "architect": { "build": { "builder": "@angular-devkit/build-angular:application", "options": { "outputPath": "dist", "index": "src/index.html", "browser": "src/main.ts", "tsConfig": "tsconfig.app.json", "styles": ["src/styles.css"] } }, "serve": { "builder": "@angular-devkit/build-angular:dev-server", "options": { "buildTarget": "app:build" } } } } }` — IGNORE dev-server deprecation warnings and NEVER change builders to `@angular/build:*`; put all TodoMVC+ CRUD/filter/undo/persistence logic in a pure TypeScript class `src/app/todo.store.ts` with ZERO `effect()` calls in constructors, NEVER import `TestBed` or `@testing-library/angular` in Vitest `*.spec.ts` — unit test `src/app/todo.store.ts` directly and test rendered UI in `e2e/todomvc.spec.ts` — wrap the app UI inside `<main>` landmark, and import `CommonModule` strictly from `@angular/common`), and `npm audit --omit=dev --audit-level=high` passes cleanly (use zero-dependency runtime TypeScript validation instead of vulnerable `zod <4.6.7`).',
     ].join('\n');
 
     const first = await callGeminiResilient({ apiKey, models: richModels, prompt: initialPrompt, phase: 'initial-build', telemetry });
@@ -374,6 +382,9 @@ async function main() {
     }
     if (check.output.includes('strictPort')) {
       hints.push('CRITICAL Playwright WebServer error: Angular `ng serve` does NOT accept `--strictPort`. Remove `--strictPort` from `playwright.config.ts` (`webServer.command: "npx ng serve --host 127.0.0.1 --port 4173"`).');
+    }
+    if (check.output.includes('@angular/build:')) {
+      hints.push('CRITICAL Angular builder error: Keep `"@angular-devkit/build-angular:application"` and `"@angular-devkit/build-angular:dev-server"` in `angular.json` (do NOT use `@angular/build:*`).');
     }
     const repairPrompt = [
       `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve ALL errors shown below:`,
