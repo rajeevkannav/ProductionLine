@@ -39,12 +39,12 @@ jobs:
       harness: ${{ steps.route.outputs.harness }}
       model: ${{ steps.route.outputs.model }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: spoke
           persist-credentials: false
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.control_plane_repo }}
           ref: ${{ inputs.control_plane_ref }}
@@ -95,12 +95,12 @@ jobs:
       pr_number: ${{ steps.pr.outputs.pr_number }}
       branch: ${{ steps.pr.outputs.branch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: spoke
           token: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.control_plane_repo }}
           ref: ${{ inputs.control_plane_ref }}
@@ -190,14 +190,14 @@ jobs:
       pull-requests: write
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.discover-spec-build.outputs.branch }}
           fetch-depth: 0
           path: spoke
           persist-credentials: false
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.control_plane_repo }}
           ref: ${{ inputs.control_plane_ref }}
@@ -284,13 +284,13 @@ jobs:
           PR_NUMBER: ${{ needs.discover-spec-build.outputs.pr_number }}
         run: gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 1
           token: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.control_plane_repo }}
           ref: ${{ inputs.control_plane_ref }}
