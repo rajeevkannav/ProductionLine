@@ -374,7 +374,7 @@ jobs:
       - name: Deploy to GitHub Pages
         if: hashFiles('pages-dist/index.html') != ''
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
       - name: Comment live Pages URL on Issue
         if: steps.deployment.outputs.page_url != '' && github.event.issue.number != ''
