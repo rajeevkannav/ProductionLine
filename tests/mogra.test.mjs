@@ -10,7 +10,7 @@ import { formatEvidenceLedger } from '../src/evidence.mjs';
 import { writeGeneratedFiles, writeRunMetrics } from '../src/free-tier-builder.mjs';
 import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
-import { countMinitestRuns, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
+import { countMinitestRuns, keepRailsPin, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
 import { generateShowcasePortal } from '../src/pages-portal.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -292,6 +292,7 @@ test('incremental builder rejects empty test runs and model-written lockfiles', 
     'clients/android/package-lock.json': '{}',
     'app/models/user.rb': 'class User; end',
     'db/schema.rb': 'ActiveRecord::Schema',
+    '.bundle/config': 'BUNDLE_FROZEN: "false"',
     'db/migrate/20250101000000_create_solid_tables.rb': 'class CreateSolidTables',
     'db/migrate/20260101000000_create_accounts.rb': 'class CreateAccounts',
   });
@@ -379,4 +380,19 @@ test('Rails bootstrap encrypts credentials with the spoke RAILS_MASTER_KEY and n
   assert.match(workflow, /unset MOGRA_RAILS_MASTER_KEY/);
   assert.ok(workflow.indexOf('unset MOGRA_RAILS_MASTER_KEY') < workflow.indexOf('run-agent.sh spoke'));
   assert.match(workflow, /rm -f config\/master\.key config\/credentials\/\*\.key/);
+});
+
+test('model Gemfile edits may add gems but keep the existing Rails pin', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mogra-gemfile-'));
+  try {
+    writeFileSync(join(dir, 'Gemfile'), 'source "https://rubygems.org"\ngem "rails", "~> 8.1.4"\ngem "pg"\n');
+    const out = keepRailsPin({ Gemfile: 'source "https://rubygems.org"\ngem "rails", "~> 8.0.0"\ngem "pg"\ngem "bcrypt", "~> 3.1.7"\n' }, dir);
+    assert.match(out.Gemfile, /gem "rails", "~> 8\.1\.4"/);
+    assert.doesNotMatch(out.Gemfile, /8\.0\.0/);
+    assert.match(out.Gemfile, /gem "bcrypt"/);
+    const untouched = keepRailsPin({ 'app/models/user.rb': 'class User; end' }, dir);
+    assert.deepEqual(Object.keys(untouched), ['app/models/user.rb']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
