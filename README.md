@@ -11,7 +11,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](package.json)
 [![Showcase](https://img.shields.io/badge/showcase-TodoMVC--Plus-6e40c9)](https://github.com/rajeevkannav/TodoMVC-Plus)
 
-*Open a GitHub Issue on any onboarded repository → **Intake & Stack Tagging → Discovery & Spec → Isolated Build → Independent Verification (tests, WCAG 2.2 AA reflow, SAST) → Gitleaks & SBOM → Auto-Merge → Deploy (GitHub Pages, Render, or mobile artifacts)**.*
+*Open a GitHub Issue on any onboarded repository → **Intake & Stack Tagging → Discovery & Spec → Isolated Build → Independent Verification (tests, WCAG 2.2 AA reflow, SAST) → Gitleaks & SBOM → Auto-Merge → Deploy (GitHub Pages, Railway + Neon, Render, or mobile artifacts)**.*
 
 </div>
 
@@ -24,7 +24,7 @@
 - **Pluggable Models & Harnesses:** Run **Gemini CLI** (Free Tier `gemini-3.1-flash-lite` ready), **Google Antigravity SDK**, **Claude Code**, **OpenAI Codex**, **Goose**, **OpenHands**, or **Aider**—with per-agent model overrides ([`harnesses/README.md`](harnesses/README.md)).
 - **Accessibility & Modern Web Built In:** Enforces WCAG 2.2 AA+, `320px` / 400% zoom zero-overflow reflow, Container Queries, `:has()`, `OKLCH`, `light-dark()`, View Transitions, local-first IndexedDB + `BroadcastChannel`, and `@axe-core/playwright` gates ([`skills/README.md`](skills/README.md)).
 - **Security & Supply-Chain First:** Least-privilege `permissions: {}` per job, env-bound inputs (zero shell injection), protected CI boundaries, Gitleaks secret scanning, `npm audit`, CycloneDX SBOMs, CodeQL, and Dependabot.
-- **Beyond SPAs (v0.2.0):** Grow a full-stack **Rails 8 + PostgreSQL + Hotwire** app one issue at a time (`incremental-feature` mode) with Minitest, RuboCop, **Brakeman**, and `bundler-audit` gates, deploy it to **Render**, and build **Hotwire Native** Android (`.apk`) and iOS clients from the same repo.
+- **Beyond SPAs (v0.2.0):** Grow a full-stack **Rails 8 + PostgreSQL + Hotwire** app one issue at a time (`incremental-feature` mode) with Minitest, RuboCop, **Brakeman**, and `bundler-audit` gates, deploy it to **Railway + Neon** (no credit card) or **Render**, and build **Hotwire Native** Android (`.apk`) and iOS clients from the same repo.
 
 ---
 
@@ -36,7 +36,7 @@ flowchart LR
     IN -->|"HITL Off (Default)"| DS["2. Discovery, Spec & Build\nPluggable Harness + Skills"]
     IN -->|"HITL On + Missing mogra:approved"| WAIT["Wait for mogra:approved"]
     DS -->|"Opens PR"| V["3. Independent Verify & Security\nPer-stack job: node-spa / rails-pg / android-apk / ios-xcode\nProtected Paths + Gitleaks + Tests + SAST\nPlaywright 320px Reflow + axe-core + SBOM"]
-    V -->|"All Gates Green"| M["4. Auto-Merge & Deploy\nGitHub Pages / Render (/up check) / mobile artifacts"]
+    V -->|"All Gates Green"| M["4. Auto-Merge & Deploy\nGitHub Pages / Railway or Render (/up check) / mobile artifacts"]
     M -->|"Optional"| DR["5. Cross-Repo Dispatch\nrepository_dispatch"]
 ```
 
@@ -50,7 +50,7 @@ flowchart LR
 
 See [`templates/spoke/README.md`](templates/spoke/README.md) for the exact step-by-step setup.
 
-**Rails + Render spoke (v0.2.0):** copy [`templates/spoke-rails/`](templates/spoke-rails/) instead. It adds `.mogra.yaml` (`rails8-pg-hotwire`, `incremental-feature`, `deployment.target: render`), CodeQL, and issue templates. Skip the GitHub Pages step; after the first PR merges, connect the repo as a Render Blueprint and set `RAILS_MASTER_KEY`. Full guide: [`templates/spoke-rails/README.md`](templates/spoke-rails/README.md).
+**Rails spoke (v0.2.0):** copy [`templates/spoke-rails/`](templates/spoke-rails/) instead. It adds `.mogra.yaml` (`rails8-pg-hotwire`, `incremental-feature`, `deployment.target: railway`), CodeQL, and issue templates. Skip the GitHub Pages step; after the first PR merges, create a Neon database and a Railway service from the repo, then set `DATABASE_URL` and `RAILS_MASTER_KEY`. Neither needs a credit card, so the app can never be billed: when Railway's free credit runs out the service stops. Render (`deployment.target: render`) is still supported but asks for a card. Full guide: [`templates/spoke-rails/README.md`](templates/spoke-rails/README.md).
 
 ### Secrets
 
@@ -58,6 +58,7 @@ See [`templates/spoke/README.md`](templates/spoke/README.md) for the exact step-
 | :--- | :--- | :--- |
 | `MOGRA_BOT_TOKEN` | Always | Fine-grained PAT whose **Repository access includes the spoke repo**, with Contents, Issues, Pull requests: Read and write. The same token can be stored in several spokes if its access list covers each one. |
 | `GEMINI_API_KEY` | Default harness | Or `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` for `claude-code` / `codex`. |
+| `RAILWAY_APP_URL` | `railway` target, optional | Public Railway URL; `mogra` polls `/up` after merge. |
 | `RENDER_DEPLOY_HOOK_URL`, `RENDER_APP_URL` | `render` target, optional | Trigger the deploy after merge and poll `/up`. |
 | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD` | Signed Android release | Not needed for debug `.apk`. |
 
@@ -69,9 +70,9 @@ See [`templates/spoke/README.md`](templates/spoke/README.md) for the exact step-
 | :--- | :--- | :--- |
 | **Agents & SDLC Loop** | [agents/README.md](agents/README.md) | Eight single-purpose SDLC agents (incl. `rails-fullstack-builder`, `mobile-native-builder`), write boundaries, and Mermaid sequence diagram. |
 | **Models & Harnesses** | [harnesses/README.md](harnesses/README.md) | `gemini-cli`, `antigravity`, `claude-code`, `codex`, `goose`, `openhands`, `aider`, and Free-Tier/Paid routing. |
-| **Capabilities & Skills** | [skills/README.md](skills/README.md) | Eleven modular `SKILL.md` contracts (`wcag-reflow-a11y`, `ultra-modern-web-css`, `security-hardening`, `rails-multi-tenant-security`, `render-free-tier-ops`, `hotwire-native-mobile`, etc.). |
+| **Capabilities & Skills** | [skills/README.md](skills/README.md) | Twelve modular `SKILL.md` contracts (`wcag-reflow-a11y`, `ultra-modern-web-css`, `security-hardening`, `rails-multi-tenant-security`, `railway-neon-free-tier-ops`, `render-free-tier-ops`, `hotwire-native-mobile`, etc.). |
 | **Showcase Spoke (`TodoMVC+`)** | [templates/spoke/README.md](templates/spoke/README.md) | Live 5-stack showcase setup (`React 19`, `Vue 3.5`, `Svelte 5`, `Angular`, `Solid`). |
-| **Rails + Render Spoke** | [templates/spoke-rails/README.md](templates/spoke-rails/README.md) | Feature-per-issue Rails 8 app on Render with Hotwire Native clients (reference: [`JumpStart_Pro_Plus`](https://github.com/rajeevkannav/JumpStart_Pro_Plus)). |
+| **Rails Spoke (Railway + Neon)** | [templates/spoke-rails/README.md](templates/spoke-rails/README.md) | Feature-per-issue Rails 8 app on Railway + Neon (or Render) with Hotwire Native clients (reference: [`JumpStart_Pro_Plus`](https://github.com/rajeevkannav/JumpStart_Pro_Plus)). |
 | **Contributing & Security** | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) | Local checks, adding skills/harnesses, and vulnerability reporting. |
 
 ---
@@ -87,7 +88,7 @@ Zero-config defaults live in [`src/conventions.mjs`](src/conventions.mjs). Spoke
 | **Supported Stacks** | `react19-ts-vite`, `vue3-ts-vite`, `svelte5-ts-vite`, `angular-ts`, `solid-ts-vite`, `rails8-pg-hotwire`, `android-hotwire-native`, `ios-hotwire-native` | `outcome.stack` |
 | **Delivery Mode** | `greenfield-stack` (`incremental-feature` for existing repos) | `outcome.mode`, `outcome.capabilities` |
 | **Verification Gates** | Protected paths, Gitleaks, unit + Playwright `320px` reflow + `axe-core`, SBOM, Evidence Ledger; Rails adds Minitest, RuboCop, Brakeman, `bundler-audit` | `gates.*` |
-| **Deployment** | GitHub Pages (`VITE_BASE_PATH` auto-resolved; custom domain ready); also `render` and `mobile-release` | `deployment.*` |
+| **Deployment** | GitHub Pages (`VITE_BASE_PATH` auto-resolved; custom domain ready); also `railway`, `render` and `mobile-release` | `deployment.*` |
 
 ---
 

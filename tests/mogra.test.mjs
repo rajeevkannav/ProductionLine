@@ -308,3 +308,41 @@ test('generated scripts are written executable', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('supports the Railway + Neon deploy target with its host skill and no Render skill', () => {
+  const spoke = mkdtempSync(join(tmpdir(), 'mogra-railway-'));
+  try {
+    writeFileSync(
+      join(spoke, '.mogra.yaml'),
+      [
+        'version: 1',
+        'outcome:',
+        '  mode: incremental-feature',
+        '  stack: rails8-pg-hotwire',
+        '  capabilities:',
+        '    - railway-neon-free-tier-ops',
+        'deployment:',
+        '  target: railway',
+        '  railway:',
+        '    service_name: jumpstart-pro-plus',
+      ].join('\n'),
+    );
+    const cfg = loadConfig({ controlPlaneDir: ROOT, spokeDir: spoke });
+    assert.equal(cfg.deployment.target, 'railway');
+    assert.equal(cfg.deployment.railway.health_path, '/up');
+    assert.equal(cfg.deployment.railway.service_name, 'jumpstart-pro-plus');
+
+    const plan = resolveAgentPlan({ config: cfg, controlPlaneDir: ROOT });
+    assert.ok(plan.skillPaths.some((p) => p.endsWith('railway-neon-free-tier-ops/SKILL.md')));
+    assert.ok(!plan.skills.includes('render-free-tier-ops'));
+
+    const issue = buildIssueUpdate({ title: 'feat: add accounts', body: '', labels: [], config: cfg });
+    assert.equal(issue.deployTarget, 'railway');
+
+    const bootstrap = readFileSync(join(ROOT, 'scripts/bootstrap-rails.sh'), 'utf8');
+    assert.match(bootstrap, /DEPLOY_TARGET" = "railway"/);
+    assert.match(bootstrap, /sleepApplication = true/);
+  } finally {
+    rmSync(spoke, { recursive: true, force: true });
+  }
+});

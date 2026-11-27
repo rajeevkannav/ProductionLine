@@ -17,6 +17,8 @@ const PRIORITY_FILES = [
   'package.json',
   'render.yaml',
   'bin/render-build.sh',
+  'railway.toml',
+  'Dockerfile',
   'config/routes.rb',
   'db/schema.rb',
   'app/models/current.rb',

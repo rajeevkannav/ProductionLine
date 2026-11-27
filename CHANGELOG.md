@@ -12,9 +12,11 @@ All notable changes to **ProductionLine (`mogra`)** are documented in this file.
 - `deployment.target: render | mobile-release` with `deployment.render.{region,health_path,service_name}`; Render deploy hook + `/up` health polling in the deploy job.
 - Per-profile verify jobs in `mogra-sdlc.yml`: `verify-node-spa`, `verify-rails-pg` (Postgres service, Brakeman, bundle-audit, CycloneDX Ruby SBOM), `verify-android-apk` (debug APK artifact), `verify-ios-xcode` (macOS runner).
 - Issue routing from `android`/`ios` (`mobile:*`) labels and `feat(android)`/`feat(ios)` title prefixes; `plan-agent --stack` picks the stack's default agent.
-- `templates/spoke-rails/`: Rails 8 + Render spoke template (`.mogra.yaml`, workflow caller, CodeQL, Dependabot, issue templates) with a setup guide covering secrets, repo settings, Render Blueprint, and mobile clients.
+- `deployment.target: railway` (Railway free plan + Neon free Postgres, no credit card, never billable): `deployment.railway.{health_path,service_name}`, `RAILWAY_APP_URL` health polling in the deploy job, `railway.toml` written by the Rails bootstrap (Dockerfile build, `/up` health check, sleep when idle), and the `railway-neon-free-tier-ops` skill.
+- `templates/spoke-rails/`: Rails 8 spoke template (`.mogra.yaml`, workflow caller, CodeQL, Dependabot, issue templates), defaulting to Railway + Neon, with a setup guide covering secrets, repo settings, Neon/Railway, and mobile clients.
 
 ### Changed
+- `rails-fullstack-builder` no longer always loads `render-free-tier-ops`; the host skill comes from `outcome.capabilities`. The deploy job's health path is read from the active target (`deployment.<target>.health_path`).
 - `verify-and-security` split into the per-profile verify jobs; `deploy-pages` replaced by a unified `deploy` job.
 - Incremental-feature issues keep their original title (no `[stack]` suffix); metadata table adds a Delivery / Deploy row when non-default.
 - `config.validateConfig` rejects unknown `outcome.mode` and `deployment.target`; `mergeConfig` no longer deep-merges into arrays.
@@ -25,7 +27,7 @@ All notable changes to **ProductionLine (`mogra`)** are documented in this file.
 - Empty `rails8-pg-hotwire` repos are bootstrapped deterministically with `rails new` (`scripts/bootstrap-rails.sh`: PostgreSQL, esbuild, Tailwind, no Kamal/CI files) before the builder agent runs, instead of the model hand-writing framework files.
 - Rails builder checks and `verify-rails-pg` now fail when `bin/rails` / `config/application.rb` are missing or Minitest reports 0 runs (previously `rails test` outside an app printed `rails new` help and passed). The builder also runs bundler-audit, and yarn-based apps are audited for high-severity advisories.
 - Model output can no longer overwrite lockfiles (`Gemfile.lock`, `yarn.lock`, `package-lock.json`).
-- Rails spokes deploying to Render are bootstrapped for a single `DATABASE_URL` (`scripts/rails-single-db.rb`): Solid Cache/Queue/Cable tables move into a regular migration on the primary database instead of three extra databases the free plan lacks.
+- Rails spokes deploying to Render or Railway + Neon are bootstrapped for a single `DATABASE_URL` (`scripts/rails-single-db.rb`): Solid Cache/Queue/Cable tables move into a regular migration on the primary database instead of three extra databases the free plan lacks.
 - Generated `bin/*` and `*.sh` files are written executable, and `verify-rails-pg` fails before merge if `render.yaml` exists but `bin/render-build.sh` is not executable.
 - Ruby version comes from the spoke's `.ruby-version` (else latest 3.4) instead of a pinned 3.4.5 that ubuntu-26.04 runners lack.
 - Issue titles already in Conventional Commit form are used as-is for the commit and PR title (no `feat(<stack>): feat(core): ...`).

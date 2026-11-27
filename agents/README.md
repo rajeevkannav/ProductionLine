@@ -37,7 +37,7 @@ sequenceDiagram
 | **`discovery-ideator`** | `discovery` | `issue-stack-router`, `wcag-reflow-a11y`, `ultra-modern-web-css` | Issue comments only |
 | **`triage-architect`** | `spec` | `issue-stack-router`, `wcag-reflow-a11y`, `ultra-modern-web-css`, `local-first-resilience`, `security-hardening` | Issue labels/body/spec |
 | **`frontend-builder`** | `build` | `wcag-reflow-a11y`, `ultra-modern-web-css`, `local-first-resilience`, `security-hardening` | App code & unit tests (no CI/config edits) |
-| **`rails-fullstack-builder`** | `build` | `rails-multi-tenant-security`, `quantumblack-rails-ui`, `render-free-tier-ops`, `wcag-reflow-a11y`, `security-hardening` | App code & Minitest (no CI/config edits) |
+| **`rails-fullstack-builder`** | `build` | `rails-multi-tenant-security`, `quantumblack-rails-ui`, `wcag-reflow-a11y`, `security-hardening`, plus the host skill from `outcome.capabilities` (`render-free-tier-ops` or `railway-neon-free-tier-ops`) | App code & Minitest (no CI/config edits) |
 | **`mobile-native-builder`** | `build` | `hotwire-native-mobile`, `security-hardening` | `clients/android`, `clients/ios` (no CI/config edits) |
 | **`qa-reflow-verifier`** | `verify` | `playwright-a11y-reflow-gate`, `evidence-first-reporting` | Verification artifacts & checks |
 | **`security-auditor`** | `security` | `security-hardening`, `rails-multi-tenant-security`, `evidence-first-reporting` | SBOM & security reports |

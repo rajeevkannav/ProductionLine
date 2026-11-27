@@ -1,4 +1,4 @@
-# ProductionLine (mogra) v0.2.0 spoke config for a Rails 8 + Render app.
+# ProductionLine (mogra) v0.2.0 spoke config for a Rails 8 app on Railway + Neon (no credit card needed).
 # Omitted fields inherit control-plane conventions (same defaults as TodoMVC-Plus).
 # Protected: automated PRs may not modify this file or .github/workflows/.
 
@@ -24,13 +24,16 @@ outcome:
   capabilities:
     - rails-multi-tenant-security
     - quantumblack-rails-ui
-    - render-free-tier-ops
+    - railway-neon-free-tier-ops # or render-free-tier-ops with deployment.target: render
     - wcag-reflow-a11y
     - security-hardening
 
 deployment:
-  target: render
-  render:
-    region: oregon
+  target: railway # railway (+ Neon Postgres) | render
+  railway:
     health_path: /up
-    service_name: my-rails-app # Render web service name
+    service_name: my-rails-app # Railway service name
+  # render:
+  #   region: oregon
+  #   health_path: /up
+  #   service_name: my-rails-app

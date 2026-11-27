@@ -22,6 +22,8 @@ on:
         required: false
       RENDER_APP_URL:
         required: false
+      RAILWAY_APP_URL:
+        required: false
       ANDROID_KEYSTORE_BASE64:
         required: false
       ANDROID_KEY_ALIAS:
@@ -55,7 +57,7 @@ jobs:
       layout: ${{ steps.route.outputs.layout }}
       subpath: ${{ steps.route.outputs.subpath }}
       verify_profile: ${{ steps.route.outputs.verify_profile }}
-      render_health_path: ${{ steps.route.outputs.render_health_path }}
+      deploy_health_path: ${{ steps.route.outputs.deploy_health_path }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -104,7 +106,7 @@ jobs:
           echo "layout=$(printf '%s' "$RES" | jq -r '.stackProfile.layout // "stacks-subpath"')" >> "$GITHUB_OUTPUT"
           echo "subpath=$(printf '%s' "$RES" | jq -r '.stackProfile.subpath // ""')" >> "$GITHUB_OUTPUT"
           echo "verify_profile=$(printf '%s' "$RES" | jq -r '.stackProfile.verifyProfile // "node-spa"')" >> "$GITHUB_OUTPUT"
-          echo "render_health_path=$(printf '%s' "$CFG" | jq -r '.deployment.render.health_path // "/up"')" >> "$GITHUB_OUTPUT"
+          echo "deploy_health_path=$(printf '%s' "$CFG" | jq -r '(.deployment[.deployment.target // ""] // {}).health_path? // "/up"')" >> "$GITHUB_OUTPUT"
 
   discover-spec-build:
     needs: intake
@@ -397,6 +399,9 @@ jobs:
           if [ -f render.yaml ] && [ ! -x bin/render-build.sh ]; then
             echo "::error::bin/render-build.sh must exist and be executable (Render buildCommand)"; exit 1
           fi
+          if [ -f railway.toml ] && [ ! -f Dockerfile ]; then
+            echo "::error::railway.toml builds from Dockerfile, which is missing"; exit 1
+          fi
           if [ -f package.json ]; then
             if [ -f yarn.lock ]; then
               command -v yarn >/dev/null 2>&1 || npm install -g yarn@1
@@ -556,8 +561,8 @@ jobs:
       pages: write
       id-token: write
     environment:
-      name: ${{ needs.intake.outputs.deploy_target == 'render' && 'render' || 'github-pages' }}
-      url: ${{ steps.deployment.outputs.page_url || steps.render_deploy.outputs.app_url }}
+      name: ${{ contains(fromJSON('["render","railway"]'), needs.intake.outputs.deploy_target) && needs.intake.outputs.deploy_target || 'github-pages' }}
+      url: ${{ steps.deployment.outputs.page_url || steps.render_deploy.outputs.app_url || steps.railway_deploy.outputs.app_url }}
     steps:
       - name: Auto-merge verified PR
         if: needs.discover-spec-build.outputs.pr_number != ''
@@ -669,7 +674,7 @@ jobs:
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
           RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
-          HEALTH_PATH: ${{ needs.intake.outputs.render_health_path }}
+          HEALTH_PATH: ${{ needs.intake.outputs.deploy_health_path }}
         run: |
           test -f render.yaml
           test -x bin/render-build.sh
@@ -690,6 +695,31 @@ jobs:
             echo "status=Merged to main; Render Blueprint auto-deploy triggered on push." >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify Railway config & poll health check
+        id: railway_deploy
+        if: needs.intake.outputs.deploy_target == 'railway'
+        env:
+          RAILWAY_APP_URL: ${{ secrets.RAILWAY_APP_URL }}
+          HEALTH_PATH: ${{ needs.intake.outputs.deploy_health_path }}
+        run: |
+          # Railway's GitHub integration deploys main on push; mogra only verifies the result.
+          test -f railway.toml
+          test -f Dockerfile
+          if [ -z "$RAILWAY_APP_URL" ]; then
+            echo "status=Merged to main; Railway auto-deploy triggered on push (set RAILWAY_APP_URL to verify ${HEALTH_PATH})." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "app_url=${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
+          # Docker build + sleeping service + Neon cold start: allow up to ~10 minutes.
+          for i in $(seq 1 40); do
+            if curl -fsS --max-time 20 "${RAILWAY_APP_URL%/}${HEALTH_PATH}" >/dev/null 2>&1; then
+              echo "status=Live and healthy at ${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "status=Merged to main; ${HEALTH_PATH} not healthy yet at ${RAILWAY_APP_URL} (still building, or free credit exhausted)" >> "$GITHUB_OUTPUT"
+
       - name: Comment deployment status on Issue
         if: github.event.issue.number != ''
         env:
@@ -697,12 +727,12 @@ jobs:
           REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
-          RENDER_STATUS: ${{ steps.render_deploy.outputs.status }}
+          HOSTED_STATUS: ${{ steps.render_deploy.outputs.status || steps.railway_deploy.outputs.status }}
           DEPLOY_TARGET: ${{ needs.intake.outputs.deploy_target }}
           STACK: ${{ needs.intake.outputs.stack }}
         run: |
-          if [ "$DEPLOY_TARGET" = "render" ]; then
-            gh issue comment "$ISSUE_NUMBER" -R "$REPO" --body "ProductionLine (\`mogra\`) verified \`${STACK}\` and merged to \`main\`. Render status: ${RENDER_STATUS}"
+          if [ "$DEPLOY_TARGET" = "render" ] || [ "$DEPLOY_TARGET" = "railway" ]; then
+            gh issue comment "$ISSUE_NUMBER" -R "$REPO" --body "ProductionLine (\`mogra\`) verified \`${STACK}\` and merged to \`main\`. ${DEPLOY_TARGET^} status: ${HOSTED_STATUS}"
           elif [ -n "$PAGE_URL" ]; then
             gh issue comment "$ISSUE_NUMBER" -R "$REPO" --body "ProductionLine (\`mogra\`) verified and deployed \`${STACK}\` to GitHub Pages: ${PAGE_URL}"
           fi

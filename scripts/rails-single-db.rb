@@ -2,7 +2,7 @@
 
 # Convert a Rails 8 app from four production databases (primary, cache, queue,
 # cable) to one, for hosts that provide a single DATABASE_URL (e.g. Render free
-# Postgres). Follows the Solid Queue/Cache/Cable single-database setup: the
+# Postgres, Neon). Follows the Solid Queue/Cache/Cable single-database setup: the
 # Solid schemas become a regular migration and the separate connections are
 # removed. Idempotent.
 #

@@ -73,7 +73,7 @@ export const SUPPORTED_STACKS = Object.freeze({
 });
 
 export const SUPPORTED_DELIVERY_MODES = Object.freeze(['greenfield-stack', 'incremental-feature']);
-export const SUPPORTED_DEPLOY_TARGETS = Object.freeze(['github-pages', 'render', 'mobile-release', 'none']);
+export const SUPPORTED_DEPLOY_TARGETS = Object.freeze(['github-pages', 'render', 'railway', 'mobile-release', 'none']);
 
 export const HARNESSES = Object.freeze({
   antigravity: {
@@ -159,6 +159,10 @@ export const CONVENTIONS = Object.freeze({
     custom_domain: '',
     render: {
       region: 'oregon',
+      health_path: '/up',
+      service_name: '',
+    },
+    railway: {
       health_path: '/up',
       service_name: '',
     },

@@ -84,13 +84,20 @@
       "properties": {
         "target": {
           "type": "string",
-          "enum": ["github-pages", "render", "mobile-release", "none"]
+          "enum": ["github-pages", "render", "railway", "mobile-release", "none"]
         },
         "custom_domain": { "type": "string" },
         "render": {
           "type": "object",
           "properties": {
             "region": { "type": "string" },
+            "health_path": { "type": "string" },
+            "service_name": { "type": "string" }
+          }
+        },
+        "railway": {
+          "type": "object",
+          "properties": {
             "health_path": { "type": "string" },
             "service_name": { "type": "string" }
           }

@@ -38,10 +38,28 @@ rails new . \
 
 bundle lock --add-platform x86_64-linux >/dev/null
 
-# Render free Postgres gives one DATABASE_URL: run Solid Cache/Queue/Cable on the primary database.
-if [ "$DEPLOY_TARGET" = "render" ]; then
+# Free Postgres (Render, Neon for Railway) gives one DATABASE_URL: run Solid Cache/Queue/Cable on the primary database.
+if [ "$DEPLOY_TARGET" = "render" ] || [ "$DEPLOY_TARGET" = "railway" ]; then
   ruby "$SCRIPT_DIR/rails-single-db.rb" .
   bundle exec rubocop -A db/migrate --format quiet || true
+fi
+
+# Railway builds the `rails new` Dockerfile; bin/docker-entrypoint runs db:prepare on boot.
+if [ "$DEPLOY_TARGET" = "railway" ] && [ ! -f railway.toml ]; then
+  cat > railway.toml <<'TOML'
+# Railway config-as-code (free plan): build the Rails Dockerfile, check /up, sleep when idle.
+# Set the service variable PORT=80 (Thruster's port) plus DATABASE_URL and RAILS_MASTER_KEY.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/up"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+sleepApplication = true
+TOML
 fi
 
 for f in bin/rails config/application.rb Gemfile.lock package.json yarn.lock; do
