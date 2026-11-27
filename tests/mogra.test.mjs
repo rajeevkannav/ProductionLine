@@ -424,3 +424,12 @@ test('issue Generators section is parsed against an allowlist', () => {
   assert.throws(() => parseGenerators('### Generators\nbin/rails generate model Post; rm -rf /'), /not allowed/);
   assert.throws(() => parseGenerators('### Generators\nbin/rails db:drop'), /unsupported line/);
 });
+
+test('model edits to generator-created files are ignored', async () => {
+  const { withoutLockedFiles } = await import('../src/incremental-builder.mjs');
+  const out = withoutLockedFiles(
+    { 'app/controllers/sessions_controller.rb': 'x', 'app/controllers/registrations_controller.rb': 'y' },
+    new Set(['app/controllers/sessions_controller.rb']),
+  );
+  assert.deepEqual(Object.keys(out), ['app/controllers/registrations_controller.rb']);
+});

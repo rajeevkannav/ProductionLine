@@ -97,6 +97,17 @@ export function countMinitestRuns(output = '') {
   return matches.length ? Number(matches[matches.length - 1][1]) : 0;
 }
 
+/** Drop model writes to files a generator created in this run: they are known to work. */
+export function withoutLockedFiles(filesMap = {}, locked = new Set()) {
+  return Object.fromEntries(
+    Object.entries(filesMap ?? {}).filter(([path]) => {
+      const keep = !locked.has(path.replace(/^\/+/, ''));
+      if (!keep) console.log(`[mogra-incremental] Kept generated ${path} (model edit ignored).`);
+      return keep;
+    }),
+  );
+}
+
 /** Files the model must never write: lockfiles (bundle/yarn), the dumped schema, and the bootstrap's Solid migration. */
 export function isGeneratedPath(path = '') {
   const normalized = String(path).replace(/^\/+/, '');
@@ -262,7 +273,7 @@ function existingTables(workdir) {
 
 /** Run the issue's allowlisted Rails generators before the model; drop generated migrations for tables that already exist. */
 export function runGenerators(workdir, commands) {
-  if (commands.length === 0) return [];
+  if (commands.length === 0) return { changed: [], created: [] };
   runCommand('bundle config set --local deployment false && bundle config set --local frozen false', workdir);
   const before = new Set(existsSync(join(workdir, 'db/migrate')) ? readdirSync(join(workdir, 'db/migrate')) : []);
   const tables = existingTables(workdir);
@@ -285,7 +296,11 @@ export function runGenerators(workdir, commands) {
     }
   }
   const status = execSync('git status --porcelain --untracked-files=all', { cwd: workdir, encoding: 'utf8' });
-  return status.split('\n').filter(Boolean).map((l) => l.slice(3).trim());
+  const entries = status.split('\n').filter(Boolean).map((l) => ({ code: l.slice(0, 2), path: l.slice(3).trim() }));
+  return {
+    changed: entries.map((e) => e.path),
+    created: entries.filter((e) => e.code === '??' || e.code.includes('A')).map((e) => e.path),
+  };
 }
 
 function checkChange(workdir, stack, changed) {
@@ -320,7 +335,9 @@ async function main() {
   const changed = new Set();
   const generators = stack === 'rails8-pg-hotwire' ? parseGenerators(promptText) : [];
   const generated = runGenerators(workdir, generators);
-  generated.forEach((p) => changed.add(p));
+  generated.changed.forEach((p) => changed.add(p));
+  const locked = new Set(generated.created);
+  const prepare = (files) => mergeGemfile(withoutLockedFiles(withoutLockfiles(files), locked), workdir);
   const ctx = buildRepoContext(workdir);
 
   const initialPrompt = [
@@ -333,7 +350,7 @@ async function main() {
     ...(generators.length
       ? [
           '## Generators Already Run',
-          `mogra already ran: ${generators.map((g) => `bin/rails generate ${g.join(' ')}`).join('; ')}. Their files are in the tree below and are known to work: extend or adjust them, do not re-create or replace them.`,
+          `mogra already ran: ${generators.map((g) => `bin/rails generate ${g.join(' ')}`).join('; ')}. These generated files are known to work and are READ-ONLY (edits are ignored): ${[...locked].join(', ') || 'none'}. Build on them: add new files, and adjust only files that existed before. Your tests must match the generated behaviour.`,
           '',
         ]
       : []),
@@ -359,7 +376,7 @@ async function main() {
   ].join('\n');
 
   const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt, phase: 'incremental-build', telemetry });
-  const written = writeGeneratedFiles(workdir, mergeGemfile(withoutLockfiles(first.files), workdir));
+  const written = writeGeneratedFiles(workdir, prepare(first.files));
   written.forEach((p) => changed.add(p));
   deleteGeneratedFiles(workdir, first.deletes);
   console.log(`[mogra-incremental] Applied ${written.length} files (${written.join(', ')}).`);
@@ -384,10 +401,11 @@ async function main() {
       '',
       'Return ONLY JSON: { "files": { "<relative-path>": "<full-file-content>" }, "deletes": [] }.',
       'Implement the WHOLE issue: every route needs its controller action and views, and every acceptance criterion needs a test.',
+      ...(locked.size ? [`Generated files are read-only (edits are ignored); fix the code and tests around them instead: ${[...locked].join(', ')}.`] : []),
       'Do not return lockfiles, db/schema.rb, or db/migrate/*_create_solid_tables.rb (generated). Minitest 6 has no `stub`/`minitest/mock`: use `define_singleton_method` or dependency injection.',
     ].join('\n');
     const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt, phase: `repair-${round}`, telemetry });
-    const updated = writeGeneratedFiles(workdir, mergeGemfile(withoutLockfiles(patched.files), workdir));
+    const updated = writeGeneratedFiles(workdir, prepare(patched.files));
     updated.forEach((p) => changed.add(p));
     deleteGeneratedFiles(workdir, patched.deletes);
     console.log(`[mogra-incremental] Repair round ${round} updated: ${updated.join(', ')}`);
