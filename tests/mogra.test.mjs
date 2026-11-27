@@ -10,7 +10,7 @@ import { formatEvidenceLedger } from '../src/evidence.mjs';
 import { writeGeneratedFiles, writeRunMetrics } from '../src/free-tier-builder.mjs';
 import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
-import { countMinitestRuns, keepRailsPin, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
+import { countMinitestRuns, mergeGemfile, missingTestChanges, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
 import { generateShowcasePortal } from '../src/pages-portal.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -382,17 +382,32 @@ test('Rails bootstrap encrypts credentials with the spoke RAILS_MASTER_KEY and n
   assert.match(workflow, /rm -f config\/master\.key config\/credentials\/\*\.key/);
 });
 
-test('model Gemfile edits may add gems but keep the existing Rails pin', () => {
+test('model Gemfile edits can only add gems, never drop gems or re-pin Rails', () => {
   const dir = mkdtempSync(join(tmpdir(), 'mogra-gemfile-'));
   try {
-    writeFileSync(join(dir, 'Gemfile'), 'source "https://rubygems.org"\ngem "rails", "~> 8.1.4"\ngem "pg"\n');
-    const out = keepRailsPin({ Gemfile: 'source "https://rubygems.org"\ngem "rails", "~> 8.0.0"\ngem "pg"\ngem "bcrypt", "~> 3.1.7"\n' }, dir);
+    writeFileSync(join(dir, 'Gemfile'), 'source "https://rubygems.org"\ngem "rails", "~> 8.1.4"\ngem "pg"\ngem "puma"\n');
+    const out = mergeGemfile({ Gemfile: 'gem "rails", "~> 8.0.0"\ngem "bcrypt", "~> 3.1.7"\n', 'app/a.rb': 'x' }, dir);
     assert.match(out.Gemfile, /gem "rails", "~> 8\.1\.4"/);
     assert.doesNotMatch(out.Gemfile, /8\.0\.0/);
-    assert.match(out.Gemfile, /gem "bcrypt"/);
-    const untouched = keepRailsPin({ 'app/models/user.rb': 'class User; end' }, dir);
-    assert.deepEqual(Object.keys(untouched), ['app/models/user.rb']);
+    assert.match(out.Gemfile, /gem "puma"/);
+    assert.match(out.Gemfile, /gem "bcrypt", "~> 3\.1\.7"/);
+    assert.equal(out['app/a.rb'], 'x');
+    const unchanged = mergeGemfile({ Gemfile: 'gem "pg"\n' }, dir);
+    assert.equal(unchanged.Gemfile, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('application changes without test changes are rejected', () => {
+  assert.equal(missingTestChanges(['app/models/user.rb', 'config/routes.rb']), true);
+  assert.equal(missingTestChanges(['app/models/user.rb', 'test/models/user_test.rb']), false);
+  assert.equal(missingTestChanges(['Gemfile', 'README.md']), false);
+});
+
+test('Rails route check script ships with the control plane', () => {
+  const script = readFileSync(join(ROOT, 'scripts/rails-route-check.rb'), 'utf8');
+  assert.match(script, /constantize/);
+  assert.match(script, /template_exists\?/);
+  assert.match(readFileSync(join(ROOT, 'src/incremental-builder.mjs'), 'utf8'), /rails runner/);
 });

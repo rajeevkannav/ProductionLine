@@ -363,6 +363,13 @@ jobs:
           path: spoke
           persist-credentials: false
 
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.control_plane_repo }}
+          ref: ${{ inputs.control_plane_ref }}
+          path: control-plane
+          persist-credentials: false
+
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ hashFiles('spoke/.ruby-version') != '' && 'default' || '3.4' }}
@@ -428,6 +435,7 @@ jobs:
           bundle exec rails test 2>&1 | tee /tmp/rails-test.log
           RUNS=$(grep -Eo '[0-9]+ runs?, [0-9]+ assertions?' /tmp/rails-test.log | tail -1 | grep -Eo '^[0-9]+' || echo 0)
           [ "${RUNS:-0}" -gt 0 ] || { echo "::error::Minitest ran 0 tests"; exit 1; }
+          bundle exec rails runner ../control-plane/scripts/rails-route-check.rb
           if [ -f .rubocop.yml ] || [ -f bin/rubocop ]; then
             bundle exec rubocop --format simple
           fi
