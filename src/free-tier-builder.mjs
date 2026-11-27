@@ -309,7 +309,7 @@ async function main() {
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
       '- Real unit tests under src/ (e.g. src/test/setup.ts with `afterEach(cleanup)` + `window.matchMedia` mock, and src/App.test.tsx testing CRUD, filters, undo/redo, and safe JSON import; ALWAYS scope item presence/removal checks inside the list via `within(screen.getByRole(\'list\'))` and NEVER assert on or `waitForElementToBeRemoved` the `role="status"` live announcer)',
       '- Comprehensive e2e/todomvc.spec.ts (CRUD, reload persistence — ALWAYS assert `toBeVisible()` and `await page.waitForTimeout(150)` BEFORE calling `await page.reload()`, zero horizontal overflow at 320px/768px/1280px, and @axe-core/playwright zero violations; use Playwright `page.getByLabel(...)` — NEVER `getByLabelText` — pass `{ exact: true }` to EVERY `getByText(..., { exact: true })` AND `getByRole(..., { name: ..., exact: true })`, and scope checkbox assertions by row/listitem when toggling changes its aria-label)',
-      'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json, and `npm audit --omit=dev --audit-level=high` passes cleanly (use zero-dependency runtime TypeScript validation instead of vulnerable `zod <4.6.7`).',
+      'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json with compatible peer versions (for Angular 19: NEVER install @testing-library/angular@18+ because it requires @angular 20+ — test Angular stores/signals directly with Vitest or pin compatible versions), and `npm audit --omit=dev --audit-level=high` passes cleanly (use zero-dependency runtime TypeScript validation instead of vulnerable `zod <4.6.7`).',
     ].join('\n');
 
     const first = await callGeminiResilient({ apiKey, models: richModels, prompt: initialPrompt, phase: 'initial-build', telemetry });
@@ -342,6 +342,9 @@ async function main() {
     }
     if (check.output.includes('eslint')) {
       hints.push('If using ESLint v9+, use eslint.config.mjs (remove .eslintrc*), or simplify lint script cleanly.');
+    }
+    if (check.output.includes('ERESOLVE')) {
+      hints.push('CRITICAL npm ERESOLVE peer conflict: Align package major versions or remove incompatible test helper packages (e.g., for @angular 19 remove @testing-library/angular@18+ or test store/signals purely with Vitest; do NOT just bump @testing-library/angular to 18/19 without matching @angular/core).');
     }
     const repairPrompt = [
       `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve ALL errors shown below:`,

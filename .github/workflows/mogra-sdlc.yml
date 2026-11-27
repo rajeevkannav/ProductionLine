@@ -327,10 +327,10 @@ jobs:
             fi
             export VITE_BASE_PATH="${ROOT_BASE}${stack_name}/"
             (cd "$dir" && npm install --no-audit --no-fund && npm run build)
-            if [ -f "${dir}/vite.config.ts" ] || [ -f "${dir}/vite.config.mts" ] || [ -f "${dir}/vite.config.js" ]; then
-              (cd "$dir" && npx vite build --base "${VITE_BASE_PATH}")
-            elif [ -f "${dir}/angular.json" ]; then
+            if [ -f "${dir}/angular.json" ]; then
               (cd "$dir" && npm run build -- --base-href "${VITE_BASE_PATH}")
+            elif [ -f "${dir}/vite.config.ts" ] || [ -f "${dir}/vite.config.mts" ] || [ -f "${dir}/vite.config.js" ]; then
+              (cd "$dir" && npx vite build --base "${VITE_BASE_PATH}")
             fi
             DIST_DIR="${dir}/dist"
             if [ -d "$DIST_DIR" ] && [ ! -f "${DIST_DIR}/index.html" ]; then
