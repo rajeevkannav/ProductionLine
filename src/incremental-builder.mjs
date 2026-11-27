@@ -189,6 +189,8 @@ function runStackChecks(workdir, stack) {
         return { ok: false, output: `Minitest ran 0 tests; add tests covering this issue.\n${testOutput.slice(-1500)}` };
       }
       if (existsSync(join(workdir, '.rubocop.yml')) || existsSync(join(workdir, 'bin/rubocop'))) {
+        // Style offenses are fixed deterministically, not by spending a model repair round on them.
+        runCommand('bundle exec rubocop -A --format quiet || true', workdir, 180_000);
         runCommand('bundle exec rubocop --format simple', workdir, 120_000);
       }
       runCommand(`bundle exec rails runner ${JSON.stringify(ROUTE_CHECK_SCRIPT)}`, workdir, 120_000);
@@ -280,7 +282,8 @@ async function main() {
   deleteGeneratedFiles(workdir, first.deletes);
   console.log(`[mogra-incremental] Applied ${written.length} files (${written.join(', ')}).`);
 
-  for (let round = 1; round <= 4; round++) {
+  const rounds = Math.max(1, Number(process.env.MOGRA_REPAIR_ROUNDS) || 6);
+  for (let round = 1; round <= rounds; round++) {
     const check = checkChange(workdir, stack, changed);
     if (check.ok) {
       writeRunMetrics(workdir, telemetry);
@@ -311,7 +314,7 @@ async function main() {
   const finalCheck = checkChange(workdir, stack, changed);
   writeRunMetrics(workdir, telemetry);
   if (!finalCheck.ok) {
-    throw new Error(`Incremental verification failed after 4 repair rounds:\n${finalCheck.output}`);
+    throw new Error(`Incremental verification failed after ${rounds} repair rounds:\n${finalCheck.output}`);
   }
 }
 
