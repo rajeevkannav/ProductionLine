@@ -566,6 +566,7 @@ jobs:
       pull-requests: write
       pages: write
       id-token: write
+      deployments: read
     environment:
       name: ${{ contains(fromJSON('["render","railway"]'), needs.intake.outputs.deploy_target) && needs.intake.outputs.deploy_target || 'github-pages' }}
       url: ${{ steps.deployment.outputs.page_url || steps.render_deploy.outputs.app_url || steps.railway_deploy.outputs.app_url }}
@@ -701,33 +702,48 @@ jobs:
             echo "status=Merged to main; Render Blueprint auto-deploy triggered on push." >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify Railway config & poll health check
+      - name: Wait for the Railway deploy of the merge commit & check health
         id: railway_deploy
         if: needs.intake.outputs.deploy_target == 'railway'
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           RAILWAY_APP_URL: ${{ secrets.RAILWAY_APP_URL }}
           HEALTH_PATH: ${{ needs.intake.outputs.deploy_health_path }}
         run: |
-          # Railway's GitHub integration deploys main on push; mogra only verifies the result.
+          # Railway's GitHub integration deploys main on push and records a GitHub deployment per commit.
+          # Wait for the deployment of *this* commit: the previous release keeps answering /up meanwhile.
           test -f railway.toml
           test -f Dockerfile
-          if [ -z "$RAILWAY_APP_URL" ]; then
-            echo "status=Merged to main; Railway auto-deploy triggered on push (set RAILWAY_APP_URL to verify ${HEALTH_PATH})." >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "app_url=${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
-          # Docker build + sleeping service + Neon cold start: allow up to ~10 minutes.
-          for i in $(seq 1 40); do
-            if curl -fsS --max-time 20 "${RAILWAY_APP_URL%/}${HEALTH_PATH}" >/dev/null 2>&1; then
-              echo "status=Live and healthy at ${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
-              exit 0
+          SHA=$(git rev-parse HEAD)
+          SHORT=${SHA:0:7}
+          [ -n "$RAILWAY_APP_URL" ] && echo "app_url=${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
+          STATE=""
+          for i in $(seq 1 60); do
+            ID=$(gh api "repos/${REPO}/deployments?sha=${SHA}" --jq '.[0].id // empty' 2>/dev/null || true)
+            if [ -n "$ID" ]; then
+              STATE=$(gh api "repos/${REPO}/deployments/${ID}/statuses" --jq '.[0].state // empty' 2>/dev/null || true)
+              case "$STATE" in success|failure|error) break ;; esac
             fi
             sleep 15
           done
-          echo "status=Merged to main; ${HEALTH_PATH} not healthy yet at ${RAILWAY_APP_URL} (still building, or free credit exhausted)" >> "$GITHUB_OUTPUT"
+          case "$STATE" in
+            success)
+              if [ -n "$RAILWAY_APP_URL" ] && curl -fsS --max-time 60 "${RAILWAY_APP_URL%/}${HEALTH_PATH}" >/dev/null 2>&1; then
+                echo "status=Deployed ${SHORT}; live and healthy at ${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
+              else
+                echo "status=Deployed ${SHORT} on Railway (set RAILWAY_APP_URL to check ${HEALTH_PATH})" >> "$GITHUB_OUTPUT"
+              fi ;;
+            failure|error)
+              echo "status=Railway deploy of ${SHORT} FAILED; check the Railway deploy logs" >> "$GITHUB_OUTPUT"
+              echo "::error::Railway deploy of ${SHORT} failed"
+              exit 1 ;;
+            *)
+              echo "status=Merged ${SHORT}; Railway deploy not finished after 15 minutes (or no Railway GitHub deployment found)" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Comment deployment status on Issue
-        if: github.event.issue.number != ''
+        if: ${{ !cancelled() && github.event.issue.number != '' }}
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
           REPO: ${{ github.repository }}

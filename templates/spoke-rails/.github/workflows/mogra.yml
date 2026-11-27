@@ -23,6 +23,7 @@ jobs:
       pull-requests: write
       pages: write
       id-token: write
+      deployments: read # mogra waits for the host's deploy of the merge commit
       security-events: write
     with:
       control_plane_repo: "rajeevkannav/ProductionLine"
