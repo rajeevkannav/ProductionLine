@@ -10,6 +10,7 @@ import { formatEvidenceLedger } from '../src/evidence.mjs';
 import { writeGeneratedFiles, writeRunMetrics } from '../src/free-tier-builder.mjs';
 import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
+import { countMinitestRuns, withoutLockfiles } from '../src/incremental-builder.mjs';
 import { generateShowcasePortal } from '../src/pages-portal.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -276,4 +277,20 @@ test('supports Rails 8 + Render + Hotwire Native mobile incremental-feature spok
   } finally {
     rmSync(spoke, { recursive: true, force: true });
   }
+});
+
+test('incremental builder rejects empty test runs and model-written lockfiles', () => {
+  assert.equal(countMinitestRuns('Finished in 0.1s.\n3 runs, 7 assertions, 0 failures, 0 errors, 0 skips'), 3);
+  assert.equal(countMinitestRuns('1 run, 1 assertion, 0 failures'), 1);
+  assert.equal(countMinitestRuns('0 runs, 0 assertions, 0 failures'), 0);
+  assert.equal(countMinitestRuns('Usage:\n  rails new APP_PATH [options]'), 0);
+
+  const kept = withoutLockfiles({
+    Gemfile: 'source "https://rubygems.org"',
+    'Gemfile.lock': 'GEM',
+    'yarn.lock': '#',
+    'clients/android/package-lock.json': '{}',
+    'app/models/user.rb': 'class User; end',
+  });
+  assert.deepEqual(Object.keys(kept).sort(), ['Gemfile', 'app/models/user.rb']);
 });

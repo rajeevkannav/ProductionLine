@@ -167,6 +167,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+          REPO_NAME: ${{ github.event.repository.name }}
         run: |
           BRANCH="mogra/issue-${ISSUE_NUMBER}-${STACK}"
           if git -C spoke ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
@@ -180,6 +181,10 @@ jobs:
             echo ""
             printf '%s\n' "$ISSUE_BODY"
           } > /tmp/issue-spec.md
+
+          if [ "$STACK" = "rails8-pg-hotwire" ] && [ ! -f spoke/config/application.rb ]; then
+            bash control-plane/scripts/bootstrap-rails.sh spoke "${REPO_NAME}"
+          fi
 
           if [ "$DELIVERY_MODE" = "greenfield-stack" ] && [ -f "spoke/stacks/${STACK}/package.json" ]; then
             echo "[mogra] Existing greenfield implementation found on ${BRANCH}; skipping LLM generation and proceeding to verification."
@@ -204,10 +209,17 @@ jobs:
           git config user.name "mogra-bot[bot]"
           git config user.email "mogra-bot@users.noreply.github.com"
           find . -type d \( -name node_modules -o -name dist -o -name playwright-report -o -name test-results -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true
+          rm -rf vendor/bundle .bundle
+          # Issue titles that are already Conventional Commits (e.g. "feat(core): ...") are used as-is.
+          if printf '%s' "$ISSUE_TITLE" | grep -Eq '^[a-z]+(\([^)]+\))?!?: '; then
+            CHANGE_TITLE="${ISSUE_TITLE} (#${ISSUE_NUMBER})"
+          else
+            CHANGE_TITLE="feat(${STACK}): ${ISSUE_TITLE} (#${ISSUE_NUMBER})"
+          fi
           if [ -n "$(git status --porcelain)" ]; then
             git add -A
             if [ "$DELIVERY_MODE" = "incremental-feature" ]; then
-              git commit -m "feat(${STACK}): ${ISSUE_TITLE} (#${ISSUE_NUMBER})"
+              git commit -m "$CHANGE_TITLE"
             else
               git commit -m "feat(${STACK}): implement TodoMVC+ for #${ISSUE_NUMBER}"
             fi
@@ -220,7 +232,7 @@ jobs:
               PR_NUM="$EXISTING_PR"
             else
               if [ "$DELIVERY_MODE" = "incremental-feature" ]; then
-                PR_TITLE="feat(${STACK}): ${ISSUE_TITLE} (#${ISSUE_NUMBER})"
+                PR_TITLE="$CHANGE_TITLE"
               else
                 PR_TITLE="feat(${STACK}): TodoMVC+ (#${ISSUE_NUMBER})"
               fi
@@ -375,15 +387,32 @@ jobs:
           RAILS_ENV: test
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/jumpstart_test
         run: |
+          set -o pipefail
           sudo apt-get update -qq && sudo apt-get install -y -qq libvips libpq-dev
           cd spoke
+          for f in Gemfile bin/rails config/application.rb; do
+            [ -f "$f" ] || { echo "::error::Not a Rails application: missing $f"; exit 1; }
+          done
           if [ -f package.json ]; then
-            npm install --no-audit --no-fund
+            if [ -f yarn.lock ]; then
+              command -v yarn >/dev/null 2>&1 || npm install -g yarn@1
+              yarn install --frozen-lockfile
+              # yarn 1 exits non-zero for any severity, so gate on high+ advisories explicitly.
+              if (yarn audit --groups dependencies --level high --json || true) | grep -q '"type":"auditAdvisory"'; then
+                yarn audit --groups dependencies --level high || true
+                echo "::error::High-severity npm advisories in production dependencies"; exit 1
+              fi
+            else
+              npm install --no-audit --no-fund
+              npm audit --omit=dev --audit-level=high
+            fi
             npm run build --if-present
-            npm audit --omit=dev --audit-level=high
+            npm run build:css --if-present
           fi
           bundle exec rails db:prepare
-          bundle exec rails test
+          bundle exec rails test 2>&1 | tee /tmp/rails-test.log
+          RUNS=$(grep -Eo '[0-9]+ runs?, [0-9]+ assertions?' /tmp/rails-test.log | tail -1 | grep -Eo '^[0-9]+' || echo 0)
+          [ "${RUNS:-0}" -gt 0 ] || { echo "::error::Minitest ran 0 tests"; exit 1; }
           if [ -f .rubocop.yml ] || [ -f bin/rubocop ]; then
             bundle exec rubocop --format simple
           fi

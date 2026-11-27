@@ -24,7 +24,7 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "validate": "node src/cli.mjs validate",
-    "check": "npm run validate && npm test && bash -n scripts/run-agent.sh"
+    "check": "npm run validate && npm test && bash -n scripts/run-agent.sh && bash -n scripts/bootstrap-rails.sh"
   },
   "engines": {
     "node": ">=22.0.0"
