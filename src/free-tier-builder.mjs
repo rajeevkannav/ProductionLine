@@ -82,20 +82,13 @@ async function callGeminiResilient({ apiKey, models, prompt }) {
       await sleep(backoffSec * 1000);
     }
     for (const model of models) {
-      for (let attempt = 1; attempt <= (model.includes('flash-lite') ? 1 : 2); attempt++) {
-        try {
-          console.log(`[mogra-oneshot] calling model='${model}'...`);
-          return await callGeminiOnce({ apiKey, model, prompt });
-        } catch (err) {
-          lastErr = err;
-          console.error(`[mogra-oneshot] ${err.message}`);
-          if (err.status && err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
-          if (!model.includes('flash-lite') && err.status === 503 && attempt === 1) {
-            await sleep(4000);
-            continue;
-          }
-          break;
-        }
+      try {
+        console.log(`[mogra-oneshot] calling model='${model}'...`);
+        return await callGeminiOnce({ apiKey, model, prompt });
+      } catch (err) {
+        lastErr = err;
+        console.error(`[mogra-oneshot] ${err.message}`);
+        if (err.status && err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
       }
     }
   }
@@ -126,8 +119,8 @@ function collectStaticIssues(workdir) {
     issues.push('Missing required file: e2e/todomvc.spec.ts.');
   } else {
     const e2eSrc = readFileSync(e2ePath, 'utf8');
-    if (!e2eSrc.includes('@axe-core/playwright') || !e2eSrc.includes('320')) {
-      issues.push('e2e/todomvc.spec.ts MUST include @axe-core/playwright WCAG checks AND a 320px viewport zero-horizontal-overflow reflow check.');
+    if (!e2eSrc.includes('@axe-core/playwright') || !e2eSrc.includes('AxeBuilder') || !e2eSrc.includes('320')) {
+      issues.push('e2e/todomvc.spec.ts MUST include @axe-core/playwright (`import AxeBuilder from "@axe-core/playwright"; const res = await new AxeBuilder({ page }).analyze(); expect(res.violations).toEqual([]);` — NEVER checkA11y) AND a 320px viewport zero-horizontal-overflow reflow check.');
     }
     if (e2eSrc.split('\n').some((line) => (line.includes('.getByText(') || (line.includes('.getByRole(') && line.includes('name:'))) && !line.includes('exact:'))) {
       issues.push('e2e/todomvc.spec.ts MUST pass `{ exact: true }` to every `.getByText(..., { exact: true })` AND `.getByRole(..., { name: ..., exact: true })` call so strict-mode locators never collide with longer aria-labels or aria-live announcements.');
@@ -308,8 +301,7 @@ async function main() {
       `Rules:\n- ${hints.join('\n- ')}`,
       'Return ONLY JSON: { "files": { "<relative-path>": "<updated-full-content>" } }.',
     ].join('\n');
-    const repairModels = round >= 4 ? richModels : models;
-    const patched = await callGeminiResilient({ apiKey, models: repairModels, prompt: repairPrompt });
+    const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt });
     const updated = writeGeneratedFiles(workdir, patched.files);
     console.log(`[mogra-oneshot] Patched ${updated.length} files (${updated.join(', ')}).`);
   }
