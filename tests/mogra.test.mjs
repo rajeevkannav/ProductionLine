@@ -434,11 +434,39 @@ test('model edits to generator-created files are ignored', async () => {
   assert.deepEqual(Object.keys(out), ['app/controllers/registrations_controller.rb']);
 });
 
-test('sub-issue chains: queued and epic issues are skipped, the next sub-issue starts after a merge', () => {
+test('sub-issue chains: queued and epic issues are skipped, and the deploy job runs the chain', () => {
   const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
   assert.match(workflow, /!contains\(github\.event\.issue\.labels\.\*\.name, 'mogra:epic'\)/);
   assert.match(workflow, /github\.event\.action == 'opened' && contains\(github\.event\.issue\.labels\.\*\.name, 'mogra:queued'\)/);
-  assert.match(workflow, /issues\/\$\{ISSUE_NUMBER\}\/parent/);
-  assert.match(workflow, /issues\/\$\{PARENT\}\/sub_issues/);
+  assert.match(workflow, /node \.mogra-control-plane\/src\/sub-issue-chain\.mjs --repo "\$REPO" --issue "\$ISSUE_NUMBER"/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ secrets\.MOGRA_BOT_TOKEN \}\}\n\s+REPO: \$\{\{ github\.repository \}\}\n\s+ISSUE_NUMBER/);
+});
+
+test('sub-issue chain walks roadmap -> milestone -> issue, closing finished milestones', async () => {
+  const { planNext } = await import('../src/sub-issue-chain.mjs');
+  const epic = [{ name: 'mogra:epic' }];
+  const issues = {
+    1: { number: 1, state: 'open', labels: epic }, // roadmap
+    14: { number: 14, state: 'open', labels: epic, parent: 1 }, // M1
+    20: { number: 20, state: 'open', labels: epic, parent: 1 }, // M2
+    21: { number: 21, state: 'open', labels: epic, parent: 1 }, // M3 (no sub-issues yet)
+    13: { number: 13, state: 'open', labels: [], parent: 14 },
+    15: { number: 15, state: 'open', labels: [], parent: 14 },
+    30: { number: 30, state: 'open', labels: [], parent: 20 },
+  };
+  const api = {
+    parent: async (n) => (issues[n]?.parent ? issues[issues[n].parent] : null),
+    subIssues: async (n) => Object.values(issues).filter((i) => i.parent === n).sort((a, b) => a.number - b.number),
+  };
+  // Within a milestone: next sibling.
+  assert.deepEqual(await planNext(13, api), { close: [], next: issues[15], paused: null });
+  // Last issue of M1: close M1 and descend into M2's first sub-issue.
+  issues[13].state = 'closed';
+  assert.deepEqual(await planNext(15, api), { close: [{ number: 14, after: 15 }], next: issues[30], paused: null });
+  // Last issue of M2: close M2 and pause at M3 (an epic without sub-issues).
+  issues[14].state = 'closed';
+  issues[15].state = 'closed';
+  assert.deepEqual(await planNext(30, api), { close: [{ number: 20, after: 30 }], next: null, paused: issues[21] });
+  // An issue without a parent chains nothing.
+  assert.deepEqual(await planNext(99, api), { close: [], next: null, paused: null });
 });
