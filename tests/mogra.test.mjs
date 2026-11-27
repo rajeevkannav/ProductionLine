@@ -200,3 +200,11 @@ test('showcase portal renders QuantumBlack UI, GitHub timeline, measured & pre-t
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('react19-ts-vite CSS-only QuantumBlack light theme keeps Tailwind v4 and safe light tokens', () => {
+  const css = readFileSync(join(ROOT, 'src', 'themes', 'react19-qb-light.css'), 'utf8');
+  assert.match(css, /@import "tailwindcss";/);
+  assert.match(css, /color-scheme:\s*light;/);
+  assert.doesNotMatch(css, /prefers-color-scheme:\s*dark/);
+  assert.match(css, /overflow-wrap:\s*anywhere;/);
+});
