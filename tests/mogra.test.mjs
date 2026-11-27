@@ -433,3 +433,12 @@ test('model edits to generator-created files are ignored', async () => {
   );
   assert.deepEqual(Object.keys(out), ['app/controllers/registrations_controller.rb']);
 });
+
+test('sub-issue chains: queued and epic issues are skipped, the next sub-issue starts after a merge', () => {
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /!contains\(github\.event\.issue\.labels\.\*\.name, 'mogra:epic'\)/);
+  assert.match(workflow, /github\.event\.action == 'opened' && contains\(github\.event\.issue\.labels\.\*\.name, 'mogra:queued'\)/);
+  assert.match(workflow, /issues\/\$\{ISSUE_NUMBER\}\/parent/);
+  assert.match(workflow, /issues\/\$\{PARENT\}\/sub_issues/);
+  assert.match(workflow, /GH_TOKEN: \$\{\{ secrets\.MOGRA_BOT_TOKEN \}\}\n\s+REPO: \$\{\{ github\.repository \}\}\n\s+ISSUE_NUMBER/);
+});

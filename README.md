@@ -52,6 +52,10 @@ See [`templates/spoke/README.md`](templates/spoke/README.md) for the exact step-
 
 **Rails spoke (v0.2.0):** copy [`templates/spoke-rails/`](templates/spoke-rails/) instead. It adds `.mogra.yaml` (`rails8-pg-hotwire`, `incremental-feature`, `deployment.target: railway`), CodeQL, and issue templates. Skip the GitHub Pages step; after the first PR merges, create a Neon database and a Railway service from the repo, then set `DATABASE_URL` and `RAILS_MASTER_KEY`. Neither needs a credit card, so the app can never be billed: when Railway's free credit runs out the service stops. Render (`deployment.target: render`) is still supported but asks for a card. Full guide: [`templates/spoke-rails/README.md`](templates/spoke-rails/README.md).
 
+### Sub-issue chains
+
+Large features run more reliably as small issues. Create a parent issue labelled `mogra:epic` (mogra never builds it) and add the steps as GitHub **sub-issues** in order, each labelled `mogra:queued` so opening them does not start a run. Start the first one with the `mogra:run` label. Each time a sub-issue is verified, merged and deployed, `mogra` starts the parent's next open sub-issue; after the last one it closes the parent. A failed run stops the chain: fix and re-run that sub-issue with `mogra:run`, and the chain continues. Chaining uses `MOGRA_BOT_TOKEN` (events from `github.token` do not trigger workflows).
+
 ### Secrets
 
 | Secret | When | Purpose |

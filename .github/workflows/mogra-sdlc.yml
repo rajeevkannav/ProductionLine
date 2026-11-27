@@ -44,7 +44,11 @@ concurrency:
 
 jobs:
   intake:
-    if: github.event_name == 'issues'
+    # Skip parent issues (mogra:epic) and queued sub-issues when they are opened; chaining starts them later.
+    if: >-
+      github.event_name == 'issues' &&
+      !contains(github.event.issue.labels.*.name, 'mogra:epic') &&
+      !(github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'mogra:queued'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -766,3 +770,32 @@ jobs:
           elif [ -n "$PAGE_URL" ]; then
             gh issue comment "$ISSUE_NUMBER" -R "$REPO" --body "ProductionLine (\`mogra\`) verified and deployed \`${STACK}\` to GitHub Pages: ${PAGE_URL}"
           fi
+
+      - name: Start the next queued sub-issue
+        # Sub-issue chaining: when this issue belongs to a parent (GitHub sub-issues), start the
+        # parent's next open sub-issue in order. Needs MOGRA_BOT_TOKEN: label events made with
+        # github.token do not trigger workflows.
+        if: success() && github.event.issue.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::MOGRA_BOT_TOKEN not set; sub-issue chaining skipped."; exit 0
+          fi
+          PARENT=$(gh api "repos/${REPO}/issues/${ISSUE_NUMBER}/parent" --jq '.number' 2>/dev/null || true)
+          if [ -z "$PARENT" ]; then
+            echo "[mogra] #${ISSUE_NUMBER} has no parent issue; nothing to chain."; exit 0
+          fi
+          NEXT=$(gh api "repos/${REPO}/issues/${PARENT}/sub_issues?per_page=100" \
+            --jq "[.[] | select(.state == \"open\" and .number != ${ISSUE_NUMBER})][0].number // empty")
+          if [ -z "$NEXT" ]; then
+            gh issue comment "$PARENT" -R "$REPO" --body "ProductionLine (\`mogra\`): #${ISSUE_NUMBER} merged; all sub-issues are done."
+            gh issue close "$PARENT" -R "$REPO" --reason completed
+            exit 0
+          fi
+          gh issue edit "$NEXT" -R "$REPO" --remove-label "mogra:queued" >/dev/null 2>&1 || true
+          gh issue edit "$NEXT" -R "$REPO" --remove-label "mogra:run" >/dev/null 2>&1 || true
+          gh issue edit "$NEXT" -R "$REPO" --add-label "mogra:run"
+          gh issue comment "$PARENT" -R "$REPO" --body "ProductionLine (\`mogra\`): #${ISSUE_NUMBER} merged and deployed; starting #${NEXT}."
