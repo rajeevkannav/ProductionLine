@@ -266,6 +266,7 @@ jobs:
       (needs.verify-and-security.result == 'success' && needs.intake.outputs.hitl_enabled == 'false' && needs.discover-spec-build.outputs.pr_number != '')
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
       issues: write
       pull-requests: write

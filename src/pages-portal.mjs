@@ -144,11 +144,17 @@ export async function fetchGithubTelemetry({ repo, token = '', fetchImpl = globa
     return { apiLive: false, issues: [], pulls: [], runs: [], jobsByRun: {} };
   }
   try {
-    const [rawIssues, rawPulls, rawRuns] = await Promise.all([
+    const [issuesRes, pullsRes, runsRes] = await Promise.allSettled([
       fetchJson(`https://api.github.com/repos/${repo}/issues?state=all&per_page=30&sort=created&direction=asc`, token, fetchImpl),
       fetchJson(`https://api.github.com/repos/${repo}/pulls?state=all&per_page=30`, token, fetchImpl),
-      fetchJson(`https://api.github.com/repos/${repo}/actions/workflows/mogra-sdlc.yml/runs?per_page=20`, token, fetchImpl),
+      fetchJson(`https://api.github.com/repos/${repo}/actions/runs?per_page=30`, token, fetchImpl),
     ]);
+    if (issuesRes.status === 'rejected' && pullsRes.status === 'rejected' && runsRes.status === 'rejected') {
+      throw issuesRes.reason;
+    }
+    const rawIssues = issuesRes.status === 'fulfilled' ? issuesRes.value : [];
+    const rawPulls = pullsRes.status === 'fulfilled' ? pullsRes.value : [];
+    const rawRuns = runsRes.status === 'fulfilled' ? runsRes.value : { workflow_runs: [] };
 
     const issues = Array.isArray(rawIssues)
       ? rawIssues
