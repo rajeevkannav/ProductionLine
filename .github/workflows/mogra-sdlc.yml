@@ -143,7 +143,7 @@ jobs:
         if: needs.intake.outputs.verify_profile == 'rails-pg'
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.4.5"
+          ruby-version: ${{ hashFiles('spoke/.ruby-version') != '' && 'default' || '3.4' }}
           working-directory: spoke
           bundler-cache: true
 
@@ -344,7 +344,7 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.4.5"
+          ruby-version: ${{ hashFiles('spoke/.ruby-version') != '' && 'default' || '3.4' }}
           working-directory: spoke
           bundler-cache: true
 
