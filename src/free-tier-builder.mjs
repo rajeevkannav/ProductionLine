@@ -349,6 +349,9 @@ async function main() {
     if (check.output.includes('NG0203')) {
       hints.push('CRITICAL Angular NG0203: Do NOT call `new AppComponent()` directly in Vitest when the constructor uses `effect()`! Either test via `TestBed.runInInjectionContext(() => new AppComponent())` / pure store class without DI, or persist changes explicitly inside store methods (add/toggle/delete/undo) instead of `effect()` in the constructor.');
     }
+    if (check.output.includes('initTestEnvironment')) {
+      hints.push('CRITICAL Angular TestBed error: In Vitest, either initialize `getTestBed().initTestEnvironment(BrowserDynamicTestingModule, platformBrowserDynamicTesting())` (with `"zone.js"`, `"zone.js/testing"`, and `"@angular/compiler"` imported) OR remove `TestBed` completely and instantiate the store/service directly (`new TodoService()`, without `effect()`/`inject()`).');
+    }
     const repairPrompt = [
       `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve ALL errors shown below:`,
       '```',
