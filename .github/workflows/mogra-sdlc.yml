@@ -18,6 +18,18 @@ on:
         required: false
       OPENAI_API_KEY:
         required: false
+      RENDER_DEPLOY_HOOK_URL:
+        required: false
+      RENDER_APP_URL:
+        required: false
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
 
 # Least-privilege: each job declares only the exact permissions it requires.
 permissions: {}
@@ -38,6 +50,12 @@ jobs:
       hitl_enabled: ${{ steps.route.outputs.hitl_enabled }}
       harness: ${{ steps.route.outputs.harness }}
       model: ${{ steps.route.outputs.model }}
+      delivery_mode: ${{ steps.route.outputs.delivery_mode }}
+      deploy_target: ${{ steps.route.outputs.deploy_target }}
+      layout: ${{ steps.route.outputs.layout }}
+      subpath: ${{ steps.route.outputs.subpath }}
+      verify_profile: ${{ steps.route.outputs.verify_profile }}
+      render_health_path: ${{ steps.route.outputs.render_health_path }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,12 +99,18 @@ jobs:
           echo "hitl_enabled=$(printf '%s' "$CFG" | jq -r '.human_in_the_loop.enabled')" >> "$GITHUB_OUTPUT"
           echo "harness=$(printf '%s' "$CFG" | jq -r '.runtime.harness')" >> "$GITHUB_OUTPUT"
           echo "model=$(printf '%s' "$CFG" | jq -r '.runtime.model')" >> "$GITHUB_OUTPUT"
+          echo "delivery_mode=$(printf '%s' "$RES" | jq -r '.deliveryMode')" >> "$GITHUB_OUTPUT"
+          echo "deploy_target=$(printf '%s' "$RES" | jq -r '.deployTarget')" >> "$GITHUB_OUTPUT"
+          echo "layout=$(printf '%s' "$RES" | jq -r '.stackProfile.layout // "stacks-subpath"')" >> "$GITHUB_OUTPUT"
+          echo "subpath=$(printf '%s' "$RES" | jq -r '.stackProfile.subpath // ""')" >> "$GITHUB_OUTPUT"
+          echo "verify_profile=$(printf '%s' "$RES" | jq -r '.stackProfile.verifyProfile // "node-spa"')" >> "$GITHUB_OUTPUT"
+          echo "render_health_path=$(printf '%s' "$CFG" | jq -r '.deployment.render.health_path // "/up"')" >> "$GITHUB_OUTPUT"
 
   discover-spec-build:
     needs: intake
     if: needs.intake.outputs.hitl_enabled == 'false' || contains(github.event.issue.labels.*.name, 'mogra:approved')
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     permissions:
       contents: write
       issues: write
@@ -115,6 +139,22 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Setup Ruby & PostgreSQL for Rails incremental builds
+        if: needs.intake.outputs.verify_profile == 'rails-pg'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.5"
+          working-directory: spoke
+          bundler-cache: true
+
+      - name: Start local PostgreSQL for Rails builder checks
+        if: needs.intake.outputs.verify_profile == 'rails-pg'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql libpq-dev libvips
+          sudo service postgresql start
+          sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';" || true
+          echo "DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jumpstart_test" >> "$GITHUB_ENV"
+
       - name: Resolve agent plans & execute configured harness
         id: build
         env:
@@ -123,6 +163,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           STACK: ${{ needs.intake.outputs.stack }}
+          DELIVERY_MODE: ${{ needs.intake.outputs.delivery_mode }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
@@ -140,10 +181,10 @@ jobs:
             printf '%s\n' "$ISSUE_BODY"
           } > /tmp/issue-spec.md
 
-          if [ -f "spoke/stacks/${STACK}/package.json" ]; then
-            echo "[mogra] Existing implementation found on ${BRANCH}; skipping LLM generation and proceeding to verification."
+          if [ "$DELIVERY_MODE" = "greenfield-stack" ] && [ -f "spoke/stacks/${STACK}/package.json" ]; then
+            echo "[mogra] Existing greenfield implementation found on ${BRANCH}; skipping LLM generation and proceeding to verification."
           else
-            node control-plane/src/cli.mjs plan-agent --control-plane control-plane --spoke spoke --agent frontend-builder > /tmp/builder-plan.json
+            node control-plane/src/cli.mjs plan-agent --control-plane control-plane --spoke spoke --stack "$STACK" > /tmp/builder-plan.json
             bash control-plane/scripts/run-agent.sh spoke /tmp/builder-plan.json "$ISSUE_NUMBER" "$STACK" /tmp/issue-spec.md
           fi
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
@@ -154,16 +195,22 @@ jobs:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
           REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
           STACK: ${{ needs.intake.outputs.stack }}
+          DELIVERY_MODE: ${{ needs.intake.outputs.delivery_mode }}
           BRANCH: ${{ steps.build.outputs.branch }}
         run: |
           cd spoke
           git config user.name "mogra-bot[bot]"
           git config user.email "mogra-bot@users.noreply.github.com"
-          find . -type d \( -name node_modules -o -name dist -o -name playwright-report -o -name test-results \) -prune -exec rm -rf {} + 2>/dev/null || true
+          find . -type d \( -name node_modules -o -name dist -o -name playwright-report -o -name test-results -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true
           if [ -n "$(git status --porcelain)" ]; then
             git add -A
-            git commit -m "feat(${STACK}): implement TodoMVC+ for #${ISSUE_NUMBER}"
+            if [ "$DELIVERY_MODE" = "incremental-feature" ]; then
+              git commit -m "feat(${STACK}): ${ISSUE_TITLE} (#${ISSUE_NUMBER})"
+            else
+              git commit -m "feat(${STACK}): implement TodoMVC+ for #${ISSUE_NUMBER}"
+            fi
             git push -f origin "$BRANCH"
           fi
           git fetch origin main --depth=1 || true
@@ -172,7 +219,12 @@ jobs:
             if [ -n "$EXISTING_PR" ]; then
               PR_NUM="$EXISTING_PR"
             else
-              PR_URL=$(gh pr create -R "$REPO" --title "feat(${STACK}): TodoMVC+ (#${ISSUE_NUMBER})" --body "Closes #${ISSUE_NUMBER}" --base main --head "$BRANCH")
+              if [ "$DELIVERY_MODE" = "incremental-feature" ]; then
+                PR_TITLE="feat(${STACK}): ${ISSUE_TITLE} (#${ISSUE_NUMBER})"
+              else
+                PR_TITLE="feat(${STACK}): TodoMVC+ (#${ISSUE_NUMBER})"
+              fi
+              PR_URL=$(gh pr create -R "$REPO" --title "$PR_TITLE" --body "Closes #${ISSUE_NUMBER}" --base main --head "$BRANCH")
               PR_NUM=$(basename "$PR_URL")
             fi
           else
@@ -181,9 +233,9 @@ jobs:
           echo "pr_number=${PR_NUM}" >> "$GITHUB_OUTPUT"
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
-  verify-and-security:
+  verify-node-spa:
     needs: [intake, discover-spec-build]
-    if: needs.discover-spec-build.outputs.pr_number != ''
+    if: needs.discover-spec-build.outputs.pr_number != '' && needs.intake.outputs.verify_profile == 'node-spa'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -260,11 +312,208 @@ jobs:
             spoke/stacks/*/sbom.cdx.json
             spoke/sbom.cdx.json
 
-  deploy-pages:
-    needs: [intake, discover-spec-build, verify-and-security]
+  verify-rails-pg:
+    needs: [intake, discover-spec-build]
+    if: needs.discover-spec-build.outputs.pr_number != '' && needs.intake.outputs.verify_profile == 'rails-pg'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jumpstart_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover-spec-build.outputs.branch }}
+          fetch-depth: 0
+          path: spoke
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.5"
+          working-directory: spoke
+          bundler-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enforce protected boundary (builders cannot alter workflows or .mogra.yaml)
+        run: |
+          cd spoke
+          git fetch origin main
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          if echo "$CHANGED" | grep -E '^(\.github/workflows/|\.mogra\.yaml)' ; then
+            echo "SECURITY VIOLATION: Automated PR attempted to modify protected CI or factory config files." >&2
+            exit 1
+          fi
+
+      - name: Secret scan (Gitleaks CLI)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R gitleaks/gitleaks -p '*linux_x64.tar.gz' -O /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks detect --source=spoke --no-git --exit-code 1 -v
+
+      - name: Install system libs & run Rails Minitest, RuboCop, Brakeman, Audit, Playwright & SBOM
+        env:
+          RAILS_ENV: test
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/jumpstart_test
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libvips libpq-dev
+          cd spoke
+          if [ -f package.json ]; then
+            npm install --no-audit --no-fund
+            npm run build --if-present
+            npm audit --omit=dev --audit-level=high
+          fi
+          bundle exec rails db:prepare
+          bundle exec rails test
+          if [ -f .rubocop.yml ] || [ -f bin/rubocop ]; then
+            bundle exec rubocop --format simple
+          fi
+          bundle exec brakeman -q --no-pager
+          if bundle exec bundle-audit --help >/dev/null 2>&1; then
+            bundle exec bundle-audit check --update
+          fi
+          if [ -f playwright.config.ts ] && jq -e '.scripts["test:e2e"]' package.json >/dev/null 2>&1; then
+            npx playwright install --with-deps chromium
+            npm run test:e2e
+          fi
+          if bundle exec cyclonedx-ruby --help >/dev/null 2>&1; then
+            bundle exec cyclonedx-ruby -p . -o sbom-ruby.cdx.json
+          fi
+          if [ -f package.json ]; then
+            npx -y @cyclonedx/cyclonedx-npm --output-file sbom-node.cdx.json
+          fi
+
+      - name: Upload Rails SBOM artifacts
+        if: hashFiles('spoke/sbom-*.cdx.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-rails-pg
+          path: spoke/sbom-*.cdx.json
+
+  verify-android-apk:
+    needs: [intake, discover-spec-build]
+    if: needs.discover-spec-build.outputs.pr_number != '' && needs.intake.outputs.verify_profile == 'android-apk'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover-spec-build.outputs.branch }}
+          fetch-depth: 0
+          path: spoke
+          persist-credentials: false
+
+      - name: Enforce protected boundary
+        run: |
+          cd spoke
+          git fetch origin main
+          if git diff --name-only origin/main...HEAD | grep -E '^(\.github/workflows/|\.mogra\.yaml)' ; then
+            echo "SECURITY VIOLATION: Automated PR attempted to modify protected CI or factory config files." >&2
+            exit 1
+          fi
+
+      - name: Secret scan (Gitleaks CLI)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R gitleaks/gitleaks -p '*linux_x64.tar.gz' -O /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks detect --source=spoke --no-git --exit-code 1 -v
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build, test, lint & emit Android APK
+        run: |
+          cd spoke/clients/android
+          chmod +x gradlew
+          ./gradlew test lint assembleDebug
+
+      - name: Upload Android Debug APK artifact
+        if: hashFiles('spoke/clients/android/app/build/outputs/apk/debug/*.apk') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: jumpstart-android-debug-apk
+          path: spoke/clients/android/app/build/outputs/apk/debug/*.apk
+
+  verify-ios-xcode:
+    needs: [intake, discover-spec-build]
+    if: needs.discover-spec-build.outputs.pr_number != '' && needs.intake.outputs.verify_profile == 'ios-xcode'
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover-spec-build.outputs.branch }}
+          fetch-depth: 0
+          path: spoke
+          persist-credentials: false
+
+      - name: Enforce protected boundary
+        run: |
+          cd spoke
+          git fetch origin main
+          if git diff --name-only origin/main...HEAD | grep -E '^(\.github/workflows/|\.mogra\.yaml)' ; then
+            echo "SECURITY VIOLATION: Automated PR attempted to modify protected CI or factory config files." >&2
+            exit 1
+          fi
+
+      - name: Secret scan (Gitleaks CLI)
+        run: |
+          brew install gitleaks
+          gitleaks detect --source=spoke --no-git --exit-code 1 -v
+
+      - name: Run SwiftPM / Simulator build & tests
+        run: |
+          cd spoke/clients/ios
+          if [ -f Package.swift ]; then
+            swift test
+          fi
+          if ls *.xcodeproj >/dev/null 2>&1; then
+            PROJ=$(ls -d *.xcodeproj | head -n1)
+            SCHEME=$(xcodebuild -list -json -project "$PROJ" | jq -r '.project.targets[0]')
+            xcodebuild -project "$PROJ" -scheme "$SCHEME" -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' build
+          fi
+
+  deploy:
+    needs: [intake, discover-spec-build, verify-node-spa, verify-rails-pg, verify-android-apk, verify-ios-xcode]
     if: >-
       (always() && github.event_name == 'repository_dispatch') ||
-      (needs.verify-and-security.result == 'success' && needs.intake.outputs.hitl_enabled == 'false' && needs.discover-spec-build.outputs.pr_number != '')
+      (always() &&
+       needs.intake.outputs.hitl_enabled == 'false' &&
+       needs.discover-spec-build.outputs.pr_number != '' &&
+       (needs.verify-node-spa.result == 'success' || needs.verify-node-spa.result == 'skipped') &&
+       (needs.verify-rails-pg.result == 'success' || needs.verify-rails-pg.result == 'skipped') &&
+       (needs.verify-android-apk.result == 'success' || needs.verify-android-apk.result == 'skipped') &&
+       (needs.verify-ios-xcode.result == 'success' || needs.verify-ios-xcode.result == 'skipped') &&
+       (needs.verify-node-spa.result == 'success' || needs.verify-rails-pg.result == 'success' || needs.verify-android-apk.result == 'success' || needs.verify-ios-xcode.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -274,8 +523,8 @@ jobs:
       pages: write
       id-token: write
     environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      name: ${{ needs.intake.outputs.deploy_target == 'render' && 'render' || 'github-pages' }}
+      url: ${{ steps.deployment.outputs.page_url || steps.render_deploy.outputs.app_url }}
     steps:
       - name: Auto-merge verified PR
         if: needs.discover-spec-build.outputs.pr_number != ''
@@ -292,6 +541,7 @@ jobs:
           token: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
 
       - uses: actions/checkout@v4
+        if: needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch'
         with:
           repository: ${{ inputs.control_plane_repo }}
           ref: ${{ inputs.control_plane_ref }}
@@ -300,10 +550,12 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-node@v4
+        if: needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch'
         with:
           node-version: "22"
 
       - name: Build all TodoMVC+ stacks for GitHub Pages
+        if: needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch'
         env:
           REPO_NAME: ${{ github.event.repository.name }}
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
@@ -364,27 +616,60 @@ jobs:
             --out pages-dist/index.html
 
       - name: Upload Pages artifact
-        if: hashFiles('pages-dist/index.html') != ''
+        if: (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch') && hashFiles('pages-dist/index.html') != ''
         uses: actions/upload-pages-artifact@v3
         with:
           path: pages-dist
 
       - name: Wait for artifact indexing
-        if: hashFiles('pages-dist/index.html') != ''
+        if: (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch') && hashFiles('pages-dist/index.html') != ''
         run: sleep 5
 
       - name: Deploy to GitHub Pages
-        if: hashFiles('pages-dist/index.html') != ''
+        if: (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch') && hashFiles('pages-dist/index.html') != ''
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Comment live Pages URL on Issue
-        if: steps.deployment.outputs.page_url != '' && github.event.issue.number != ''
+      - name: Verify Render Blueprint & trigger optional Deploy Hook
+        id: render_deploy
+        if: needs.intake.outputs.deploy_target == 'render'
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+          HEALTH_PATH: ${{ needs.intake.outputs.render_health_path }}
+        run: |
+          test -f render.yaml
+          test -x bin/render-build.sh
+          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
+            curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL" >/dev/null
+          fi
+          if [ -n "$RENDER_APP_URL" ]; then
+            echo "app_url=${RENDER_APP_URL}" >> "$GITHUB_OUTPUT"
+            for i in $(seq 1 18); do
+              if curl -fsS --max-time 10 "${RENDER_APP_URL%/}${HEALTH_PATH}" >/dev/null 2>&1; then
+                echo "status=Live and healthy at ${RENDER_APP_URL}" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              sleep 10
+            done
+            echo "status=Merged to main; Render auto-deploy is building (${RENDER_APP_URL})" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=Merged to main; Render Blueprint auto-deploy triggered on push." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment deployment status on Issue
+        if: github.event.issue.number != ''
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
           REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          RENDER_STATUS: ${{ steps.render_deploy.outputs.status }}
+          DEPLOY_TARGET: ${{ needs.intake.outputs.deploy_target }}
           STACK: ${{ needs.intake.outputs.stack }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" -R "$REPO" --body "ProductionLine (\`mogra\`) verified and deployed \`${STACK}\` to GitHub Pages: ${PAGE_URL}"
+          if [ "$DEPLOY_TARGET" = "render" ]; then
+            gh issue comment "$ISSUE_NUMBER" -R "$REPO" --body "ProductionLine (\`mogra\`) verified \`${STACK}\` and merged to \`main\`. Render status: ${RENDER_STATUS}"
+          elif [ -n "$PAGE_URL" ]; then
+            gh issue comment "$ISSUE_NUMBER" -R "$REPO" --body "ProductionLine (\`mogra\`) verified and deployed \`${STACK}\` to GitHub Pages: ${PAGE_URL}"
+          fi

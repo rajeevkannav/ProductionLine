@@ -86,7 +86,7 @@ async function callGeminiOnce({ apiKey, model, prompt }) {
 }
 
 /** Call Gemini rotating across candidate models and backing off cleanly on 429/503/network timeouts. */
-async function callGeminiResilient({ apiKey, models, prompt, phase = 'build', telemetry = [] }) {
+export async function callGeminiResilient({ apiKey, models, prompt, phase = 'build', telemetry = [] }) {
   let lastErr;
   for (const backoffSec of [0, 15, 35]) {
     if (backoffSec > 0) {

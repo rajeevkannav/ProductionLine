@@ -2,6 +2,24 @@
 
 All notable changes to **ProductionLine (`mogra`)** are documented in this file.
 
+## [0.2.0] - 2026-11-27
+
+### Added
+- Three new stacks: `rails8-pg-hotwire` (Rails 8 + PostgreSQL + Solid Stack + Hotwire + Tailwind CSS v4), `android-hotwire-native` (`clients/android`), and `ios-hotwire-native` (`clients/ios`). Each stack profile now declares `runtime`, `layout`, `verifyProfile`, and `defaultAgent`.
+- `outcome.mode: incremental-feature` delivery mode (alongside the default `greenfield-stack`) and `outcome.capabilities` for loading extra skills into a spoke's agents.
+- `src/incremental-builder.mjs`: repo-context-aware patch builder with protected-path deletes and stack-specific verify/repair loops (Minitest + RuboCop + Brakeman, Gradle `test lint assembleDebug`, `swift test`).
+- Agents `rails-fullstack-builder` and `mobile-native-builder`; skills `rails-multi-tenant-security`, `quantumblack-rails-ui`, `render-free-tier-ops`, and `hotwire-native-mobile`.
+- `deployment.target: render | mobile-release` with `deployment.render.{region,health_path,service_name}`; Render deploy hook + `/up` health polling in the deploy job.
+- Per-profile verify jobs in `mogra-sdlc.yml`: `verify-node-spa`, `verify-rails-pg` (Postgres service, Brakeman, bundle-audit, CycloneDX Ruby SBOM), `verify-android-apk` (debug APK artifact), `verify-ios-xcode` (macOS runner).
+- Issue routing from `android`/`ios` (`mobile:*`) labels and `feat(android)`/`feat(ios)` title prefixes; `plan-agent --stack` picks the stack's default agent.
+
+### Changed
+- `verify-and-security` split into the per-profile verify jobs; `deploy-pages` replaced by a unified `deploy` job.
+- Incremental-feature issues keep their original title (no `[stack]` suffix); metadata table adds a Delivery / Deploy row when non-default.
+- `config.validateConfig` rejects unknown `outcome.mode` and `deployment.target`; `mergeConfig` no longer deep-merges into arrays.
+- `yaml-lite` parses block sequences under nested keys (e.g. `outcome.capabilities:` followed by `- item`).
+- `run-agent.sh` resolves the working directory from the stack layout (`repo-root`, `subpath`, `stacks/<id>`) and routes incremental runs to the incremental builder.
+
 ## [0.1.0] - 2026-11-25
 
 ### Added

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.mjs';
+import { SUPPORTED_STACKS } from './conventions.mjs';
 import { buildIssueUpdate } from './issue-router.mjs';
 import { resolveAgentPlan } from './harness-runner.mjs';
 import { formatEvidenceLedger } from './evidence.mjs';
@@ -37,9 +38,13 @@ try {
     const labels = flags.labels ? flags.labels.split(',').map((s) => s.trim()).filter(Boolean) : [];
     console.log(JSON.stringify(buildIssueUpdate({ title, body, labels, config }), null, 2));
   } else if (command === 'plan-agent') {
-    const agentName = flags.agent ?? 'frontend-builder';
+    const stackOverride = flags.stack ?? null;
+    const defaultAgent = (stackOverride && SUPPORTED_STACKS[stackOverride]?.defaultAgent)
+      || SUPPORTED_STACKS[config.outcome.stack]?.defaultAgent
+      || 'frontend-builder';
+    const agentName = flags.agent ?? defaultAgent;
     const prompt = flags.prompt ?? '';
-    console.log(JSON.stringify(resolveAgentPlan({ agentName, config, controlPlaneDir, prompt }), null, 2));
+    console.log(JSON.stringify(resolveAgentPlan({ agentName, config, controlPlaneDir, prompt, stackOverride }), null, 2));
   } else if (command === 'evidence') {
     const checks = flags['checks-file'] ? JSON.parse(readFileSync(flags['checks-file'], 'utf8')) : [];
     console.log(formatEvidenceLedger({

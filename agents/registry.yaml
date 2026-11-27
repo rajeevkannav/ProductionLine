@@ -4,12 +4,12 @@
 agents:
   discovery-ideator:
     stage: discovery
-    goal: Convert an open GitHub Issue into clear user outcomes, edge cases, and TodoMVC+ UX differentiators.
+    goal: Convert an open GitHub Issue into clear user outcomes, edge cases, and acceptance criteria.
     skills: [issue-stack-router, wcag-reflow-a11y, ultra-modern-web-css]
 
   triage-architect:
     stage: spec
-    goal: Lock stack selection, update the GitHub Issue with the stack name, and publish a concrete architecture & acceptance spec.
+    goal: Lock stack selection, update the GitHub Issue with stack metadata, and publish a concrete architecture & acceptance spec.
     skills: [issue-stack-router, wcag-reflow-a11y, ultra-modern-web-css, local-first-resilience, security-hardening]
 
   frontend-builder:
@@ -17,17 +17,27 @@ agents:
     goal: Implement the complete TodoMVC+ outcome in an isolated worktree satisfying all accessibility, reflow, security, and modern web standards.
     skills: [wcag-reflow-a11y, ultra-modern-web-css, local-first-resilience, security-hardening]
 
+  rails-fullstack-builder:
+    stage: build
+    goal: Incrementally implement full-stack Rails 8 + PostgreSQL + Hotwire features per GitHub Issue with Minitest coverage, multi-tenant isolation, QuantumBlack Tailwind UI, and Render readiness.
+    skills: [rails-multi-tenant-security, quantumblack-rails-ui, render-free-tier-ops, wcag-reflow-a11y, security-hardening]
+
+  mobile-native-builder:
+    stage: build
+    goal: Incrementally implement Hotwire Native Android (.apk) and iOS (SwiftPM/Xcode) features connected to the live Rails backend.
+    skills: [hotwire-native-mobile, security-hardening]
+
   qa-reflow-verifier:
     stage: verify
-    goal: Independently run unit, keyboard E2E, 320px/400% reflow, axe-core WCAG 2.2 AA, and cross-tab sync verification.
+    goal: Independently run unit/integration tests, keyboard E2E, 320px/400% reflow, axe-core WCAG 2.2 AA, and security/mobile build verification.
     skills: [playwright-a11y-reflow-gate, evidence-first-reporting]
 
   security-auditor:
     stage: security
-    goal: Enforce protected-path boundaries, secret scanning, SAST, dependency audit, and CycloneDX SBOM generation before merge.
-    skills: [security-hardening, evidence-first-reporting]
+    goal: Enforce protected-path boundaries, secret scanning, SAST (CodeQL/Brakeman), dependency audit, and CycloneDX SBOM generation before merge.
+    skills: [security-hardening, rails-multi-tenant-security, evidence-first-reporting]
 
   pr-curator:
     stage: review-merge
-    goal: Attach a factual Evidence Ledger to the PR, update the GitHub Issue, and trigger GitHub Pages / cross-repo release.
+    goal: Attach a factual Evidence Ledger to the PR, update the GitHub Issue, and trigger GitHub Pages / Render / Mobile release verification.
     skills: [evidence-first-reporting, issue-stack-router]

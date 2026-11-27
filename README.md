@@ -71,9 +71,10 @@ Zero-config defaults live in [`src/conventions.mjs`](src/conventions.mjs). Spoke
 | :--- | :--- | :--- |
 | **Harness & Model** | `gemini-cli` / `gemini-3.1-flash-lite` | `runtime.harness`, `runtime.model`, `agents.<name>` |
 | **Human-in-the-Loop** | `false` (autonomous end-to-end) | `human_in_the_loop.enabled` |
-| **Supported Stacks** | `react19-ts-vite`, `vue3-ts-vite`, `svelte5-ts-vite`, `angular-ts`, `solid-ts-vite` | `outcome.stack` |
+| **Supported Stacks** | `react19-ts-vite`, `vue3-ts-vite`, `svelte5-ts-vite`, `angular-ts`, `solid-ts-vite`, `rails8-pg-hotwire`, `android-hotwire-native`, `ios-hotwire-native` | `outcome.stack` |
+| **Delivery Mode** | `greenfield-stack` (`incremental-feature` for existing repos) | `outcome.mode`, `outcome.capabilities` |
 | **Verification Gates** | Protected paths, Gitleaks, unit + Playwright `320px` reflow + `axe-core`, SBOM, Evidence Ledger | `gates.*` |
-| **Deployment** | GitHub Pages (`VITE_BASE_PATH` auto-resolved; custom domain ready) | `deployment.*` |
+| **Deployment** | GitHub Pages (`VITE_BASE_PATH` auto-resolved; custom domain ready); also `render` and `mobile-release` | `deployment.*` |
 
 ---
 

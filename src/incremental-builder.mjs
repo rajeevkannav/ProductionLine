@@ -1,0 +1,216 @@
+#!/usr/bin/env node
+/**
+ * Incremental multi-stack feature builder for existing repositories (Rails, Android, iOS, etc.).
+ * Reads repo context, requests scoped JSON file patches, enforces protected boundaries,
+ * and runs stack-specific local verification + repair loops.
+ */
+
+import { execSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
+import { callGeminiResilient, writeGeneratedFiles, writeRunMetrics } from './free-tier-builder.mjs';
+
+const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'log', 'storage', 'vendor', '.gradle', 'build', 'DerivedData', 'dist']);
+const CONTEXT_EXTENSIONS = /\.(rb|erb|rake|js|mjs|ts|tsx|css|html|json|yml|yaml|sh|kt|kts|swift|xml|plist|md)$/i;
+const PRIORITY_FILES = [
+  'Gemfile',
+  'package.json',
+  'render.yaml',
+  'bin/render-build.sh',
+  'config/routes.rb',
+  'db/schema.rb',
+  'app/models/current.rb',
+  'app/models/user.rb',
+  'app/models/account.rb',
+  'app/controllers/application_controller.rb',
+  'playwright.config.ts',
+  'build.gradle.kts',
+  'app/build.gradle.kts',
+  'Package.swift',
+];
+
+function listRepoFiles(root, prefix = '') {
+  const out = [];
+  if (!existsSync(join(root, prefix))) return out;
+  for (const entry of readdirSync(join(root, prefix), { withFileTypes: true })) {
+    if (SKIP_DIRS.has(entry.name)) continue;
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...listRepoFiles(root, rel));
+    else out.push(rel);
+  }
+  return out;
+}
+
+function buildRepoContext(workdir, maxChars = 48_000) {
+  const allFiles = listRepoFiles(workdir);
+  const prioritized = [
+    ...PRIORITY_FILES.filter((f) => allFiles.includes(f)),
+    ...allFiles.filter((f) => !PRIORITY_FILES.includes(f) && CONTEXT_EXTENSIONS.test(f)),
+  ];
+
+  let used = 0;
+  const snippets = [];
+  for (const rel of prioritized) {
+    if (used >= maxChars) break;
+    const abs = join(workdir, rel);
+    if (!existsSync(abs)) continue;
+    const content = readFileSync(abs, 'utf8');
+    const slice = content.slice(0, 4000);
+    const block = `### \`${rel}\`\n\`\`\`\n${slice}\n\`\`\``;
+    if (used + block.length > maxChars && snippets.length > 0) continue;
+    snippets.push(block);
+    used += block.length;
+  }
+
+  return {
+    tree: allFiles.slice(0, 250).join('\n'),
+    snippets: snippets.join('\n\n'),
+  };
+}
+
+function deleteGeneratedFiles(workdir, deletes = []) {
+  const root = resolve(workdir);
+  for (const relPath of deletes ?? []) {
+    if (typeof relPath !== 'string') continue;
+    const normalized = relPath.replace(/^\/+/, '');
+    if (normalized.startsWith('.github/') || normalized.startsWith('.git/') || normalized === '.mogra.yaml') {
+      throw new Error(`Security block: forbidden delete path '${relPath}'`);
+    }
+    const target = resolve(root, normalized);
+    const rel = relative(root, target);
+    if (!rel || rel.startsWith('..') || rel.includes('../')) {
+      throw new Error(`Security block: path traversal delete '${relPath}'`);
+    }
+    if (existsSync(target)) rmSync(target, { force: true });
+  }
+}
+
+function runCommand(cmd, cwd, timeout = 180_000) {
+  execSync(cmd, {
+    cwd,
+    env: { ...process.env, CI: process.env.CI || 'true', RAILS_ENV: process.env.RAILS_ENV || 'test' },
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+}
+
+function runStackChecks(workdir, stack) {
+  try {
+    if (stack === 'rails8-pg-hotwire') {
+      if (!existsSync(join(workdir, 'Gemfile'))) {
+        return { ok: false, output: 'Missing Gemfile in Rails repository root.' };
+      }
+      runCommand('bundle check || bundle install --quiet', workdir, 240_000);
+      runCommand('bundle exec rails db:prepare', workdir, 120_000);
+      runCommand('bundle exec rails test', workdir, 180_000);
+      if (existsSync(join(workdir, '.rubocop.yml')) || existsSync(join(workdir, 'bin/rubocop'))) {
+        runCommand('bundle exec rubocop --format simple', workdir, 120_000);
+      }
+      runCommand('bundle exec brakeman -q --no-pager', workdir, 120_000);
+    } else if (stack === 'android-hotwire-native') {
+      if (existsSync(join(workdir, 'gradlew'))) {
+        runCommand('chmod +x gradlew && ./gradlew test lint assembleDebug', workdir, 300_000);
+      } else if (!existsSync(join(workdir, 'build.gradle.kts')) && !existsSync(join(workdir, 'build.gradle'))) {
+        return { ok: false, output: 'Missing Android Gradle build file (build.gradle.kts / gradlew).' };
+      }
+    } else if (stack === 'ios-hotwire-native') {
+      if (process.platform === 'darwin' && existsSync(join(workdir, 'Package.swift'))) {
+        runCommand('swift test', workdir, 240_000);
+      } else if (!existsSync(join(workdir, 'Package.swift')) && !readdirSync(workdir).some((f) => f.endsWith('.xcodeproj'))) {
+        return { ok: false, output: 'Missing Package.swift or .xcodeproj in iOS directory.' };
+      }
+    }
+    return { ok: true, output: '' };
+  } catch (err) {
+    const raw = `${err.stdout ?? ''}\n${err.stderr ?? ''}\n${err.message ?? ''}`.trim();
+    return { ok: false, output: raw.slice(-5500) };
+  }
+}
+
+async function main() {
+  const args = Object.fromEntries(
+    process.argv.slice(2).reduce((acc, cur, idx, arr) => {
+      if (cur.startsWith('--')) acc.push([cur.slice(2), arr[idx + 1]]);
+      return acc;
+    }, []),
+  );
+  const workdir = resolve(args.workdir ?? '.');
+  const stack = args.stack ?? 'rails8-pg-hotwire';
+  const primaryModel = args.model ?? 'gemini-3.1-flash-lite';
+  const envCandidates = (process.env.MOGRA_CANDIDATES ?? '').split(/\s+/).filter(Boolean);
+  const models = [...new Set(['gemini-3-flash-preview', primaryModel, ...envCandidates.filter((m) => /flash/.test(m))])];
+  const promptText = readFileSync(args['prompt-file'], 'utf8');
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is required');
+
+  const telemetry = [];
+  const ctx = buildRepoContext(workdir);
+
+  const initialPrompt = [
+    promptText,
+    '',
+    `## Target Stack & Delivery Mode`,
+    `- Stack: ${stack}`,
+    `- Mode: incremental-feature (extend existing repository cleanly; preserve existing features and passing tests)`,
+    '',
+    '## Current Repository Tree',
+    '```',
+    ctx.tree,
+    '```',
+    '',
+    '## Key Existing Files',
+    ctx.snippets,
+    '',
+    '## Output Format (STRICT JSON)',
+    'Return ONLY a JSON object with shape: { "files": { "<relative-path>": "<full-file-content>" }, "deletes": [] }.',
+    'Rules:',
+    '- Include ONLY new or modified files (with full updated contents), never return unchanged files.',
+    '- NEVER modify .github/workflows/, .mogra.yaml, or delete existing passing tests.',
+    '- Include comprehensive Minitest unit/integration tests for Rails features or unit tests for mobile clients.',
+  ].join('\n');
+
+  const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt, phase: 'incremental-build', telemetry });
+  const written = writeGeneratedFiles(workdir, first.files);
+  deleteGeneratedFiles(workdir, first.deletes);
+  console.log(`[mogra-incremental] Applied ${written.length} files (${written.join(', ')}).`);
+
+  for (let round = 1; round <= 4; round++) {
+    const check = runStackChecks(workdir, stack);
+    if (check.ok) {
+      writeRunMetrics(workdir, telemetry);
+      console.log(`[mogra-incremental] Verification passed for ${stack}.`);
+      return;
+    }
+    console.error(`[mogra-incremental] Check failed (round ${round}); requesting repair:\n${check.output}`);
+    const latestCtx = buildRepoContext(workdir, 36_000);
+    const repairPrompt = [
+      `Fix the errors below in stack '${stack}' while preserving all existing features:`,
+      '```',
+      check.output,
+      '```',
+      '',
+      latestCtx.snippets,
+      '',
+      'Return ONLY JSON: { "files": { "<relative-path>": "<full-file-content>" }, "deletes": [] }.',
+    ].join('\n');
+    const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt, phase: `repair-${round}`, telemetry });
+    const updated = writeGeneratedFiles(workdir, patched.files);
+    deleteGeneratedFiles(workdir, patched.deletes);
+    console.log(`[mogra-incremental] Repair round ${round} updated: ${updated.join(', ')}`);
+  }
+
+  const finalCheck = runStackChecks(workdir, stack);
+  writeRunMetrics(workdir, telemetry);
+  if (!finalCheck.ok) {
+    throw new Error(`Incremental verification failed after 4 repair rounds:\n${finalCheck.output}`);
+  }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(`[mogra-incremental] Fatal: ${err.message}`);
+    process.exit(1);
+  });
+}

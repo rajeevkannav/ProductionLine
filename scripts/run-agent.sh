@@ -11,13 +11,28 @@ HARNESS=$(jq -r '.harness' "$PLAN_JSON")
 MODEL=$(jq -r '.model' "$PLAN_JSON")
 BIN=$(jq -r '.bin' "$PLAN_JSON")
 ENV_KEY=$(jq -r '.envKey // empty' "$PLAN_JSON")
-RETRY_WAIT="${MOGRA_RETRY_WAIT:-70}"
+DELIVERY_MODE=$(jq -r '.deliveryMode // "greenfield-stack"' "$PLAN_JSON")
+LAYOUT=$(jq -r '.stackProfile.layout // "stacks-subpath"' "$PLAN_JSON")
+SUBPATH=$(jq -r '.stackProfile.subpath // empty' "$PLAN_JSON")
 export PROMPT_FILE="/tmp/mogra-prompt-${ISSUE_NUMBER}.md"
 export MOGRA_MODEL="$MODEL"
+
+case "$LAYOUT" in
+  repo-root)
+    WORKDIR="${SPOKE_DIR}"
+    ;;
+  subpath)
+    WORKDIR="${SPOKE_DIR}/${SUBPATH:-$STACK}"
+    ;;
+  *)
+    WORKDIR="${SPOKE_DIR}/stacks/${STACK}"
+    ;;
+esac
 
 {
   echo "# ProductionLine (mogra) Task — Issue #${ISSUE_NUMBER} (${STACK})"
   echo "Goal: $(jq -r '.goal' "$PLAN_JSON")"
+  echo "Delivery Mode: ${DELIVERY_MODE}"
   if [ -n "$ISSUE_FILE" ] && [ -f "$ISSUE_FILE" ]; then
     echo ""
     cat "$ISSUE_FILE"
@@ -28,27 +43,20 @@ export MOGRA_MODEL="$MODEL"
     [ -f "$skill_path" ] && sed '/^---$/,/^---$/d' "$skill_path"
   done
   echo "## Rules"
-  echo "- Build '${STACK}' inside '${SPOKE_DIR}/stacks/${STACK}' with scripts: typecheck, lint, test, build, test:e2e (Playwright + @axe-core/playwright 320px reflow)."
-  echo "- Dynamic base path via process.env.VITE_BASE_PATH || '/'."
-  echo "- Never edit .github/workflows/, .mogra.yaml, or other stacks/."
+  if [ "$DELIVERY_MODE" = "incremental-feature" ]; then
+    echo "- Work inside '${WORKDIR}' and implement the requested GitHub Issue incrementally without breaking existing features."
+    echo "- Include complete tests (Minitest for Rails, Gradle unit/lint for Android, Swift/XCTest for iOS)."
+  else
+    echo "- Build '${STACK}' inside '${WORKDIR}' with scripts: typecheck, lint, test, build, test:e2e (Playwright + @axe-core/playwright 320px reflow)."
+    echo "- Dynamic base path via process.env.VITE_BASE_PATH || '/'."
+  fi
+  echo "- Never edit .github/workflows/ or .mogra.yaml."
 } > "$PROMPT_FILE"
 
 if [ -n "$ENV_KEY" ] && [ -z "${!ENV_KEY:-}" ]; then
   echo "Missing required secret env var: ${ENV_KEY} for harness '${HARNESS}' (${MODEL})." >&2
   exit 1
 fi
-
-run_gemini_cli() {
-  local target_model="${1:-}"
-  export GEMINI_CLI_TRUST_WORKSPACE=true
-  local args=(--yolo --skip-trust -p "$(cat "$PROMPT_FILE")")
-  [ -n "$target_model" ] && args=(-m "$target_model" "${args[@]}")
-  if command -v gemini >/dev/null 2>&1; then
-    gemini "${args[@]}"
-  else
-    npx -y @google/gemini-cli "${args[@]}"
-  fi
-}
 
 discover_flash_models() {
   local all
@@ -66,23 +74,23 @@ discover_flash_models() {
   } | awk 'NF && !seen[$0]++'
 }
 
-probe_gemini_model() {
-  curl -sS -o /dev/null -w "%{http_code}" \
-    -H "x-goog-api-key: ${GEMINI_API_KEY}" \
-    -H "Content-Type: application/json" \
-    -d '{"contents":[{"parts":[{"text":"ok"}]}],"generationConfig":{"maxOutputTokens":1}}' \
-    "https://generativelanguage.googleapis.com/v1beta/models/${1}:generateContent" || echo "000"
-}
-
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CONTROL_PLANE_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
 
 run_free_tier_oneshot() {
   local target_model="$1"
-  node "${CONTROL_PLANE_DIR}/src/free-tier-builder.mjs" \
-    --workdir "." \
-    --model "$target_model" \
-    --prompt-file "$PROMPT_FILE"
+  if [ "$DELIVERY_MODE" = "incremental-feature" ]; then
+    node "${CONTROL_PLANE_DIR}/src/incremental-builder.mjs" \
+      --workdir "." \
+      --stack "$STACK" \
+      --model "$target_model" \
+      --prompt-file "$PROMPT_FILE"
+  else
+    node "${CONTROL_PLANE_DIR}/src/free-tier-builder.mjs" \
+      --workdir "." \
+      --model "$target_model" \
+      --prompt-file "$PROMPT_FILE"
+  fi
 }
 
 run_free_tier_gemini_loop() {
@@ -92,16 +100,14 @@ run_free_tier_gemini_loop() {
   run_free_tier_oneshot "${FLASH_MODELS[0]:-$MODEL}"
 }
 
-mkdir -p "${SPOKE_DIR}/stacks/${STACK}"
-echo "Running harness=${HARNESS} model=${MODEL} stack=${STACK} workdir=${SPOKE_DIR}/stacks/${STACK}"
-cd "${SPOKE_DIR}/stacks/${STACK}"
+mkdir -p "$WORKDIR"
+echo "Running harness=${HARNESS} model=${MODEL} stack=${STACK} mode=${DELIVERY_MODE} workdir=${WORKDIR}"
+cd "$WORKDIR"
 
 case "$HARNESS" in
   antigravity)
-    # Free-tier 250K TPM cannot accommodate antigravity's full localharness prompt overhead;
-    # route *-flash-lite directly through gemini-cli unless paid tier is used.
     if [[ "$MODEL" == *flash-lite* ]]; then
-      echo "[mogra] Free-Tier Flash-Lite model detected; running lean gemini-cli directly to stay under 250K TPM." >&2
+      echo "[mogra] Free-Tier Flash-Lite model detected; running lean gemini loop directly to stay under 250K TPM." >&2
       run_free_tier_gemini_loop && exit 0
       exit 1
     fi
@@ -112,7 +118,7 @@ from google.antigravity import Agent, LocalAgentConfig, CapabilitiesConfig
 
 prompt = pathlib.Path(os.environ['PROMPT_FILE']).read_text()
 kwargs = dict(
-    system_instructions='You are ProductionLine (mogra) frontend-builder. Implement everything completely in the current working directory, run tests locally, and satisfy every attached skill.',
+    system_instructions='You are ProductionLine (mogra) builder. Implement everything completely in the current working directory, run tests locally, and satisfy every attached skill.',
     capabilities=CapabilitiesConfig(),
 )
 sig = inspect.signature(LocalAgentConfig)

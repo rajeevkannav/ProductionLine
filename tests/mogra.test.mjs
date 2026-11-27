@@ -14,16 +14,27 @@ import { generateShowcasePortal } from '../src/pages-portal.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('loads convention-first defaults with HITL disabled, security gates on, and 5 stacks', () => {
+test('loads convention-first defaults with HITL disabled, security gates on, and 8 supported stacks', () => {
   const cfg = loadConfig({ controlPlaneDir: ROOT });
   assert.equal(cfg.human_in_the_loop.enabled, false);
   assert.equal(cfg.runtime.harness, 'gemini-cli');
   assert.equal(cfg.outcome.stack, 'react19-ts-vite');
+  assert.equal(cfg.outcome.mode, 'greenfield-stack');
+  assert.equal(cfg.deployment.target, 'github-pages');
   assert.equal(cfg.gates.protected_paths_enforced, true);
   assert.equal(cfg.gates.secret_scan_required, true);
   assert.deepEqual(
     Object.keys(SUPPORTED_STACKS),
-    ['react19-ts-vite', 'vue3-ts-vite', 'svelte5-ts-vite', 'angular-ts', 'solid-ts-vite'],
+    [
+      'react19-ts-vite',
+      'vue3-ts-vite',
+      'svelte5-ts-vite',
+      'angular-ts',
+      'solid-ts-vite',
+      'rails8-pg-hotwire',
+      'android-hotwire-native',
+      'ios-hotwire-native',
+    ],
   );
 });
 
@@ -64,9 +75,10 @@ test('rejects invalid stack names during config validation', () => {
   }
 });
 
-test('issue router resolves all 5 TodoMVC+ stacks and updates issue metadata idempotently', () => {
+test('issue router resolves all TodoMVC+ stacks and updates issue metadata idempotently', () => {
   const cfg = loadConfig({ controlPlaneDir: ROOT });
-  for (const stackId of Object.keys(SUPPORTED_STACKS)) {
+  const frontendStacks = ['react19-ts-vite', 'vue3-ts-vite', 'svelte5-ts-vite', 'angular-ts', 'solid-ts-vite'];
+  for (const stackId of frontendStacks) {
     const resolved = resolveIssueStack({
       body: `### TodoMVC+ Stack\n\n${stackId}\n\n### Goal\nBuild TodoMVC+`,
       defaultStack: cfg.outcome.stack,
@@ -207,4 +219,61 @@ test('react19-ts-vite CSS-only QuantumBlack light theme keeps Tailwind v4 and sa
   assert.match(css, /color-scheme:\s*light;/);
   assert.doesNotMatch(css, /prefers-color-scheme:\s*dark/);
   assert.match(css, /overflow-wrap:\s*anywhere;/);
+});
+
+test('supports Rails 8 + Render + Hotwire Native mobile incremental-feature spoke configuration', () => {
+  const spoke = mkdtempSync(join(tmpdir(), 'mogra-jumpstart-'));
+  try {
+    writeFileSync(
+      join(spoke, '.mogra.yaml'),
+      [
+        'version: 1',
+        'outcome:',
+        '  blueprint: jumpstart-pro-plus',
+        '  mode: incremental-feature',
+        '  stack: rails8-pg-hotwire',
+        '  capabilities:',
+        '    - rails-multi-tenant-security',
+        '    - quantumblack-rails-ui',
+        '    - render-free-tier-ops',
+        'deployment:',
+        '  target: render',
+        '  render:',
+        '    region: oregon',
+        '    health_path: /up',
+      ].join('\n'),
+    );
+    const cfg = loadConfig({ controlPlaneDir: ROOT, spokeDir: spoke });
+    assert.equal(cfg.outcome.blueprint, 'jumpstart-pro-plus');
+    assert.equal(cfg.outcome.mode, 'incremental-feature');
+    assert.equal(cfg.outcome.stack, 'rails8-pg-hotwire');
+    assert.equal(cfg.deployment.target, 'render');
+    assert.equal(cfg.deployment.render.region, 'oregon');
+    assert.deepEqual(cfg.outcome.capabilities, [
+      'rails-multi-tenant-security',
+      'quantumblack-rails-ui',
+      'render-free-tier-ops',
+    ]);
+
+    const railsPlan = resolveAgentPlan({ config: cfg, controlPlaneDir: ROOT });
+    assert.equal(railsPlan.agent, 'rails-fullstack-builder');
+    assert.equal(railsPlan.stackProfile.layout, 'repo-root');
+    assert.equal(railsPlan.stackProfile.verifyProfile, 'rails-pg');
+    assert.ok(railsPlan.skills.includes('rails-multi-tenant-security'));
+    assert.ok(railsPlan.skillPaths.some((p) => p.endsWith('render-free-tier-ops/SKILL.md')));
+
+    const androidIssue = buildIssueUpdate({
+      title: 'feat(android): scaffold Hotwire Native app',
+      body: 'Build Android client',
+      labels: ['enhancement'],
+      config: cfg,
+    });
+    assert.equal(androidIssue.stack, 'android-hotwire-native');
+    assert.equal(androidIssue.title, 'feat(android): scaffold Hotwire Native app');
+    assert.equal(androidIssue.stackProfile.subpath, 'clients/android');
+    assert.equal(androidIssue.deliveryMode, 'incremental-feature');
+    assert.equal(androidIssue.deployTarget, 'render');
+  } finally {
+    rmSync(spoke, { recursive: true, force: true });
+  }
 });
