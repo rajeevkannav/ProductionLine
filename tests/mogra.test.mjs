@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config.mjs';
 import { SUPPORTED_STACKS } from '../src/conventions.mjs';
 import { formatEvidenceLedger } from '../src/evidence.mjs';
-import { writeGeneratedFiles, writeRunMetrics } from '../src/free-tier-builder.mjs';
+import { collectStaticIssues, CROSS_STACK_UI, writeGeneratedFiles, writeRunMetrics } from '../src/free-tier-builder.mjs';
 import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
 import { generateShowcasePortal } from '../src/pages-portal.mjs';
@@ -207,4 +207,109 @@ test('react19-ts-vite CSS-only QuantumBlack light theme keeps Tailwind v4 and sa
   assert.match(css, /color-scheme:\s*light;/);
   assert.doesNotMatch(css, /prefers-color-scheme:\s*dark/);
   assert.match(css, /overflow-wrap:\s*anywhere;/);
+});
+
+function writeCompliantStack(dir) {
+  const files = {
+    'package.json': JSON.stringify({ name: 'stack', devDependencies: { vite: '^7.0.0', vitest: '^3.0.0' } }),
+    'vitest.config.ts': 'export default { test: { environment: "jsdom", exclude: ["e2e/**"] } };',
+    'vite.config.ts': 'export default { base: process.env.VITE_BASE_PATH || "/" };',
+    'playwright.config.ts': 'export default { webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173", url: "http://127.0.0.1:4173" } };',
+    'e2e/todomvc.spec.ts': 'import AxeBuilder from "@axe-core/playwright";\ntest("a11y", async ({ page }) => { await page.setViewportSize({ width: 320, height: 640 }); await new AxeBuilder({ page }).analyze(); });',
+    'src/main.ts': "import './styles.css';\nimport { mount } from './app';",
+    'src/app.ts': [
+      'const store = { undo() {}, filter: "active" as "all" | "active" | "completed" }; localStorage.getItem("todos");',
+      `export const markup = \`<main class="todoapp">${CROSS_STACK_UI.requiredClasses.map((c) => `<div class="${c}"></div>`).join('')}</main>\`;`,
+    ].join('\n'),
+    'src/styles.css': [
+      `:root {\n  color-scheme: light;\n${Object.entries(CROSS_STACK_UI.lightTokens).map(([k, v]) => `  ${k}: ${v};`).join('\n')}\n}`,
+      `:root[data-theme="dark"] {\n  color-scheme: dark;\n${Object.entries(CROSS_STACK_UI.darkTokens).map(([k, v]) => `  ${k}: ${v};`).join('\n')}\n}`,
+      '.todoapp { max-width: var(--qb-content-width); }',
+    ].join('\n'),
+  };
+  for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  }
+}
+
+test('cross-stack UI contract: compliant stack passes static checks', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mogra-ui-'));
+  try {
+    writeCompliantStack(dir);
+    assert.deepEqual(collectStaticIssues(dir), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cross-stack UI contract: flags skeleton, token, theme, Tailwind, and scoped-style drift', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mogra-ui-'));
+  const issuesAfter = (mutate) => {
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeCompliantStack(dir);
+    mutate();
+    return collectStaticIssues(dir).join('\n');
+  };
+  try {
+    const appPath = join(dir, 'src/app.ts');
+    assert.match(
+      issuesAfter(() => writeFileSync(appPath, readFileSync(appPath, 'utf8').replace(/todo-filters/g, 'filters').replace(/"todo-list"/, '"todos"'))),
+      /missing class name\(s\) `todo-list`, `todo-filters`/,
+    );
+
+    const cssPath = join(dir, 'src/styles.css');
+    assert.match(
+      issuesAfter(() => writeFileSync(cssPath, readFileSync(cssPath, 'utf8').replace(/--qb-accent:/g, '--brand:'))),
+      /missing shared design token\(s\) --qb-accent\b/,
+    );
+    assert.match(
+      issuesAfter(() => writeFileSync(cssPath, `${readFileSync(cssPath, 'utf8')}\n@media (prefers-color-scheme: dark) { :root { --qb-canvas: #000; } }`)),
+      /MUST NOT auto-switch themes/,
+    );
+    assert.match(issuesAfter(() => rmSync(cssPath)), /Missing required global stylesheet `src\/styles\.css`/);
+    assert.match(issuesAfter(() => writeFileSync(join(dir, 'src/main.ts'), "import { mount } from './app';")), /is never loaded/);
+    assert.match(
+      issuesAfter(() => writeFileSync(join(dir, 'package.json'), JSON.stringify({ devDependencies: { tailwindcss: '^4.0.0', '@tailwindcss/vite': '^4.0.0' } }))),
+      /remove tailwindcss, @tailwindcss\/vite/,
+    );
+    assert.match(
+      issuesAfter(() => writeFileSync(join(dir, 'src/Item.svelte'), '<li class="todo-item"></li>\n<style>li { color: red; }</style>')),
+      /Component-scoped <style> block in src\/Item\.svelte/,
+    );
+    assert.match(
+      issuesAfter(() => writeFileSync(join(dir, 'src/app.component.ts'), "@Component({ selector: 'app-root', styleUrl: './app.component.css' }) export class AppComponent {}")),
+      /Angular component styles in src\/app\.component\.ts/,
+    );
+    // Angular may load the stylesheet through angular.json instead of an entry import.
+    assert.doesNotMatch(
+      issuesAfter(() => {
+        writeFileSync(join(dir, 'src/main.ts'), "import { mount } from './app';");
+        writeFileSync(join(dir, 'angular.json'), JSON.stringify({ projects: { app: { architect: { build: { options: { styles: ['src/styles.css'] } } } } } }));
+      }),
+      /is never loaded/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cross-stack UI light tokens match the react19-ts-vite QuantumBlack light theme', () => {
+  const css = readFileSync(join(ROOT, 'src', 'themes', 'react19-qb-light.css'), 'utf8');
+  const pairs = {
+    '--qb-canvas': '--qb-canvas',
+    '--qb-surface': '--qb-surface',
+    '--qb-elevated': '--qb-elevated',
+    '--qb-text': '--qb-text',
+    '--qb-text-secondary': '--qb-text-secondary',
+    '--qb-text-muted': '--qb-text-muted',
+    '--qb-teal': '--qb-accent',
+    '--qb-teal-hover': '--qb-accent-hover',
+    '--qb-sky': '--qb-focus',
+  };
+  for (const [react19Token, sharedToken] of Object.entries(pairs)) {
+    const value = css.match(new RegExp(`${react19Token}:\\s*([^;]+);`))?.[1];
+    assert.equal(CROSS_STACK_UI.lightTokens[sharedToken], value, `${sharedToken} should equal react19 ${react19Token}`);
+  }
 });
