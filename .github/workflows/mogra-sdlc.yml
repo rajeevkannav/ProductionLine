@@ -363,7 +363,7 @@ jobs:
 
       - name: Upload Pages artifact
         if: hashFiles('pages-dist/index.html') != ''
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: pages-dist
 
