@@ -347,6 +347,10 @@ jobs:
         with:
           path: pages-dist
 
+      - name: Wait for artifact indexing
+        if: hashFiles('pages-dist/index.html') != ''
+        run: sleep 5
+
       - name: Deploy to GitHub Pages
         if: hashFiles('pages-dist/index.html') != ''
         id: deployment
