@@ -316,7 +316,7 @@ async function main() {
       '- package.json (scripts: dev, typecheck: "tsc --noEmit", lint: "tsc --noEmit", test: "vitest run", build: "tsc --noEmit && vite build", test:e2e: "playwright test")',
       '- tsconfig.json (MUST have "noEmit": true, "module": "ES2022", "moduleResolution": "bundler", "skipLibCheck": true, and NEVER set "allowImportingTsExtensions", "downlevelIteration", or "baseUrl")',
       '- vite.config.ts (with base: process.env.VITE_BASE_PATH || "/")',
-      '- vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"])',
+      '- vitest.config.ts (using vitest/config with test.environment="jsdom", include:["src/**/*.{test,spec}.{ts,tsx}"], exclude:["e2e/**","node_modules/**","dist/**"]; for solid-ts-vite MUST include `plugins: [solid()]`, `resolve: { conditions: ["development", "browser"] }`, and `test.deps`/`server.deps.inline: [/solid-js/]` so SolidJS runs in client mode!)',
       '- playwright.config.ts (testDir:"./e2e", timeout: 30000, webServer: { command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort" for Vite OR "npx ng serve --host 127.0.0.1 --port 4173" for Angular (NEVER pass --strictPort to ng serve!), url: "http://127.0.0.1:4173", reuseExistingServer: !process.env["CI"], timeout: 60000 }, use: { baseURL: "http://127.0.0.1:4173" })',
       '- index.html',
       '- Modular src/* source files & clean modern CSS (prefer native CSS without postcss.config.js unless all plugins are in devDependencies; feature-detect `window.matchMedia?.(...)` and `typeof BroadcastChannel !== "undefined"` so Vitest jsdom never throws)',
@@ -391,6 +391,9 @@ async function main() {
     }
     if (check.output.includes('downlevelIteration') || check.output.includes('moduleResolution=node10')) {
       hints.push('CRITICAL TS6 tsconfig error: Remove `"downlevelIteration"` and set `"module": "ES2022", "moduleResolution": "bundler", "skipLibCheck": true` in `tsconfig.json`.');
+    }
+    if (check.output.includes('Client-only API called on the server side')) {
+      hints.push('CRITICAL SolidJS Vitest SSR error: SolidJS is resolving server bundle inside Vitest! In `vitest.config.ts`, MUST include `plugins: [solid()]` (from `vite-plugin-solid`), `resolve: { conditions: ["development", "browser"] }`, and `test: { environment: "jsdom", server: { deps: { inline: [/solid-js/] } }, exclude: ["e2e/**"] }`, or test a pure signal store in `src/store.test.ts` without DOM `render()`.');
     }
     const repairPrompt = [
       `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve ALL errors shown below:`,
