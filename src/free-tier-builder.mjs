@@ -346,6 +346,9 @@ async function main() {
     if (check.output.includes('ERESOLVE')) {
       hints.push('CRITICAL npm ERESOLVE peer conflict: Align package major versions or remove incompatible test helper packages (e.g., for @angular 19 remove @testing-library/angular@18+ or test store/signals purely with Vitest; do NOT just bump @testing-library/angular to 18/19 without matching @angular/core).');
     }
+    if (check.output.includes('NG0203')) {
+      hints.push('CRITICAL Angular NG0203: Do NOT call `new AppComponent()` directly in Vitest when the constructor uses `effect()`! Either test via `TestBed.runInInjectionContext(() => new AppComponent())` / pure store class without DI, or persist changes explicitly inside store methods (add/toggle/delete/undo) instead of `effect()` in the constructor.');
+    }
     const repairPrompt = [
       `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve ALL errors shown below:`,
       '```',
