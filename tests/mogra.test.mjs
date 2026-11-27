@@ -10,7 +10,7 @@ import { formatEvidenceLedger } from '../src/evidence.mjs';
 import { writeGeneratedFiles, writeRunMetrics } from '../src/free-tier-builder.mjs';
 import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
-import { countMinitestRuns, withoutLockfiles } from '../src/incremental-builder.mjs';
+import { countMinitestRuns, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
 import { generateShowcasePortal } from '../src/pages-portal.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -291,8 +291,28 @@ test('incremental builder rejects empty test runs and model-written lockfiles', 
     'yarn.lock': '#',
     'clients/android/package-lock.json': '{}',
     'app/models/user.rb': 'class User; end',
+    'db/schema.rb': 'ActiveRecord::Schema',
+    'db/migrate/20250101000000_create_solid_tables.rb': 'class CreateSolidTables',
+    'db/migrate/20260101000000_create_accounts.rb': 'class CreateAccounts',
   });
-  assert.deepEqual(Object.keys(kept).sort(), ['Gemfile', 'app/models/user.rb']);
+  assert.deepEqual(Object.keys(kept).sort(), [
+    'Gemfile',
+    'app/models/user.rb',
+    'db/migrate/20260101000000_create_accounts.rb',
+  ]);
+});
+
+test('failure summaries keep the error message and drop gem backtraces', () => {
+  const frames = Array.from({ length: 400 }, (_, i) => `\tfrom /opt/ruby/lib/ruby/gems/3.4.0/gems/minitest-6.1.0/lib/minitest.rb:${i}:in 'x'`);
+  const raw = ["test/foo_test.rb:2:in 'require': cannot load such file -- minitest/mock (LoadError)", ...frames, 'Command failed: bundle exec rails test'].join('\n');
+  const out = summarizeFailure(raw);
+  assert.match(out, /cannot load such file -- minitest\/mock/);
+  assert.match(out, /Command failed: bundle exec rails test/);
+  assert.ok(out.split('\n').filter((l) => l.includes('/gems/')).length <= 3);
+  const long = summarizeFailure(`HEAD-ERROR\n${'x'.repeat(20000)}\nTAIL`, 1000);
+  assert.ok(long.length < 1100);
+  assert.match(long, /^HEAD-ERROR/);
+  assert.match(long, /TAIL$/);
 });
 
 test('generated scripts are written executable', () => {
