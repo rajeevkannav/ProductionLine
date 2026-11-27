@@ -1,0 +1,50 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1"
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            glob: ".github/workflows/*.yml"
+          - language: ruby
+            glob: "**/*.rb"
+          - language: javascript-typescript
+            glob: "app/javascript/**"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Ruby/JS analysis activates automatically once the Rails app lands (Issue #1).
+      - name: Detect source for language
+        id: detect
+        run: |
+          shopt -s globstar nullglob
+          files=( ${{ matrix.glob }} )
+          echo "present=$([ ${#files[@]} -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - uses: github/codeql-action/init@v3
+        if: steps.detect.outputs.present == 'true'
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@v3
+        if: steps.detect.outputs.present == 'true'
+        with:
+          category: "/language:${{ matrix.language }}"

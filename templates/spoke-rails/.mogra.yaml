@@ -1,0 +1,36 @@
+# ProductionLine (mogra) v0.2.0 spoke config for a Rails 8 + Render app.
+# Omitted fields inherit control-plane conventions (same defaults as TodoMVC-Plus).
+# Protected: automated PRs may not modify this file or .github/workflows/.
+
+version: 1
+
+runtime:
+  harness: gemini-cli # gemini-cli | antigravity | claude-code | codex | goose | openhands | aider
+  model: gemini-3.1-flash-lite
+
+# Per-agent overrides, e.g.:
+# agents:
+#   rails-fullstack-builder:
+#     harness: claude-code
+#     model: claude-sonnet-4-5
+
+human_in_the_loop:
+  enabled: false # set true to require the mogra:approved label before build/merge
+
+outcome:
+  blueprint: rails-saas # free-form label shown in issue metadata
+  stack: rails8-pg-hotwire
+  mode: incremental-feature
+  capabilities:
+    - rails-multi-tenant-security
+    - quantumblack-rails-ui
+    - render-free-tier-ops
+    - wcag-reflow-a11y
+    - security-hardening
+
+deployment:
+  target: render
+  render:
+    region: oregon
+    health_path: /up
+    service_name: my-rails-app # Render web service name

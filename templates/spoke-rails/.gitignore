@@ -1,0 +1,36 @@
+# Rails
+/.bundle
+/log/*
+/tmp/*
+/storage/*
+/public/assets
+/public/packs
+/app/assets/builds/*
+!/app/assets/builds/.keep
+/config/master.key
+/config/credentials/*.key
+# Node
+node_modules/
+# Test / CI artifacts
+playwright-report/
+test-results/
+coverage/
+sbom*.cdx.json
+# Env & secrets
+.env
+.env.*
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+# Android / iOS
+clients/android/.gradle/
+clients/android/build/
+clients/android/app/build/
+clients/android/local.properties
+clients/ios/build/
+clients/ios/DerivedData/
+xcuserdata/
+# OS
+.DS_Store
+*.log

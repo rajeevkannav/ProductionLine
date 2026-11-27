@@ -1,6 +1,6 @@
 # ProductionLine (`mogra`) Agents Guide
 
-`mogra` splits software delivery across **six single-purpose agents** defined in [`registry.yaml`](registry.yaml). Splitting Builder, Verifier, and Security roles prevents the **"grading your own homework"** failure mode.
+`mogra` splits software delivery across **eight single-purpose agents** defined in [`registry.yaml`](registry.yaml). Splitting Builder, Verifier, and Security roles prevents the **"grading your own homework"** failure mode.
 
 ---
 

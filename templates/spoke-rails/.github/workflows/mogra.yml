@@ -1,0 +1,40 @@
+name: ProductionLine (mogra)
+
+on:
+  issues:
+    types: [opened, labeled]
+  repository_dispatch:
+    types: [mogra.trigger]
+
+permissions: {}
+
+jobs:
+  mogra:
+    if: >-
+      github.event_name != 'issues' ||
+      github.event.action == 'opened' ||
+      (github.event.action == 'labeled' && (github.event.label.name == 'mogra:approved' || github.event.label.name == 'mogra:run'))
+    # Pinned to the v0.2.0 release track; switch to @v0.2.0 once the tag is cut.
+    uses: rajeevkannav/ProductionLine/.github/workflows/mogra-sdlc.yml@feat/v0.2.0
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+      pages: write
+      id-token: write
+      security-events: write
+    with:
+      control_plane_repo: "rajeevkannav/ProductionLine"
+      control_plane_ref: "feat/v0.2.0"
+    secrets:
+      MOGRA_BOT_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}

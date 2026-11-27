@@ -12,6 +12,7 @@ All notable changes to **ProductionLine (`mogra`)** are documented in this file.
 - `deployment.target: render | mobile-release` with `deployment.render.{region,health_path,service_name}`; Render deploy hook + `/up` health polling in the deploy job.
 - Per-profile verify jobs in `mogra-sdlc.yml`: `verify-node-spa`, `verify-rails-pg` (Postgres service, Brakeman, bundle-audit, CycloneDX Ruby SBOM), `verify-android-apk` (debug APK artifact), `verify-ios-xcode` (macOS runner).
 - Issue routing from `android`/`ios` (`mobile:*`) labels and `feat(android)`/`feat(ios)` title prefixes; `plan-agent --stack` picks the stack's default agent.
+- `templates/spoke-rails/`: Rails 8 + Render spoke template (`.mogra.yaml`, workflow caller, CodeQL, Dependabot, issue templates) with a setup guide covering secrets, repo settings, Render Blueprint, and mobile clients.
 
 ### Changed
 - `verify-and-security` split into the per-profile verify jobs; `deploy-pages` replaced by a unified `deploy` job.

@@ -1,0 +1,32 @@
+name: Bug (mogra)
+description: Report a defect. ProductionLine (mogra) will reproduce, fix, verify, and deploy.
+title: "fix(scope): "
+labels: ["mogra:intake", "bug"]
+body:
+  - type: dropdown
+    id: stack
+    attributes:
+      label: Target Stack
+      options:
+        - rails8-pg-hotwire
+        - android-hotwire-native
+        - ios-hotwire-native
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs Actual
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Page / Endpoint
+      placeholder: https://<service>.onrender.com/...
