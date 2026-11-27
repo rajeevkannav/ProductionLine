@@ -5,7 +5,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
 const FORBIDDEN_PREFIXES = ['.github/', '.git/', 'node_modules/', 'dist/'];
@@ -375,6 +375,10 @@ async function main() {
     ].join('\n');
     const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt, phase: `repair-${round}`, telemetry });
     const updated = writeGeneratedFiles(workdir, patched.files);
+    if (updated.includes('package.json')) {
+      rmSync(join(workdir, 'package-lock.json'), { force: true });
+      rmSync(join(workdir, 'node_modules'), { recursive: true, force: true });
+    }
     console.log(`[mogra-oneshot] Patched ${updated.length} files (${updated.join(', ')}).`);
   }
 
