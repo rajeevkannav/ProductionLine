@@ -24,6 +24,8 @@ on:
         required: false
       RAILWAY_APP_URL:
         required: false
+      RAILS_MASTER_KEY:
+        required: false
       ANDROID_KEYSTORE_BASE64:
         required: false
       ANDROID_KEY_ALIAS:
@@ -171,6 +173,7 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
           REPO_NAME: ${{ github.event.repository.name }}
           DEPLOY_TARGET: ${{ needs.intake.outputs.deploy_target }}
+          MOGRA_RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
         run: |
           BRANCH="mogra/issue-${ISSUE_NUMBER}-${STACK}"
           if git -C spoke ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
@@ -186,8 +189,10 @@ jobs:
           } > /tmp/issue-spec.md
 
           if [ "$STACK" = "rails8-pg-hotwire" ] && [ ! -f spoke/config/application.rb ]; then
-            bash control-plane/scripts/bootstrap-rails.sh spoke "${REPO_NAME}" "${DEPLOY_TARGET}"
+            RAILS_MASTER_KEY="$MOGRA_RAILS_MASTER_KEY" bash control-plane/scripts/bootstrap-rails.sh spoke "${REPO_NAME}" "${DEPLOY_TARGET}"
           fi
+          # The master key is only needed to encrypt credentials during bootstrap; keep it away from the agent.
+          unset MOGRA_RAILS_MASTER_KEY
 
           if [ "$DELIVERY_MODE" = "greenfield-stack" ] && [ -f "spoke/stacks/${STACK}/package.json" ]; then
             echo "[mogra] Existing greenfield implementation found on ${BRANCH}; skipping LLM generation and proceeding to verification."
@@ -213,6 +218,7 @@ jobs:
           git config user.email "mogra-bot@users.noreply.github.com"
           find . -type d \( -name node_modules -o -name dist -o -name playwright-report -o -name test-results -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true
           rm -rf vendor/bundle .bundle
+          rm -f config/master.key config/credentials/*.key
           # Issue titles that are already Conventional Commits (e.g. "feat(core): ...") are used as-is.
           if printf '%s' "$ISSUE_TITLE" | grep -Eq '^[a-z]+(\([^)]+\))?!?: '; then
             CHANGE_TITLE="${ISSUE_TITLE} (#${ISSUE_NUMBER})"

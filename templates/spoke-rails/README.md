@@ -44,6 +44,7 @@ gh api -X PUT repos/$R/private-vulnerability-reporting
 | :--- | :--- | :--- |
 | `MOGRA_BOT_TOKEN` | Yes | Fine-grained PAT. Its **Repository access must include this repo**, with **Contents, Issues, Pull requests: Read and write** (Metadata: Read). |
 | `GEMINI_API_KEY` | Yes (default harness) | `gemini-cli`. Use `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` instead when `.mogra.yaml` selects `claude-code` / `codex`. |
+| `RAILS_MASTER_KEY` | Yes | 32 hex characters. `mogra` encrypts the app's `config/credentials.yml.enc` with it when it runs `rails new`, then deletes the key file from the runner. Set the **same value** as `RAILS_MASTER_KEY` on Railway. Keep a copy in your password manager. |
 | `RAILWAY_APP_URL` | Optional | e.g. `https://<service>.up.railway.app`; `mogra` polls `<url>/up` after merge and comments the result. |
 | `RENDER_DEPLOY_HOOK_URL`, `RENDER_APP_URL` | Render target only | Render deploy hook and public URL. |
 | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD` | Mobile only | Signed release `.apk`. Debug `.apk` needs none. |
@@ -51,6 +52,7 @@ gh api -X PUT repos/$R/private-vulnerability-reporting
 ```sh
 gh secret set MOGRA_BOT_TOKEN -R <owner>/<repo>
 gh secret set GEMINI_API_KEY -R <owner>/<repo>
+openssl rand -hex 16 > master.key && gh secret set RAILS_MASTER_KEY -R <owner>/<repo> < master.key   # store master.key safely, then delete it
 ```
 
 **About `MOGRA_BOT_TOKEN`:** a repo secret is just a stored copy of the token value. The same token can be stored in several repos, but it only works in a repo that the token's own *Repository access* list includes. An `HTTP 403: Resource not accessible by personal access token` during intake means the stored token cannot write Issues on this repo. The control-plane repo (`ProductionLine`) is only read (public checkout), so the token never needs write access there.
@@ -63,7 +65,7 @@ Open a **Feature** issue with `Target Stack: rails8-pg-hotwire` asking for the R
 2. **Railway** (sign up with GitHub, no card): **New Project → Deploy from GitHub repo** → pick the repository. Railway reads `railway.toml` and builds the `Dockerfile`.
 3. In the service's **Variables**, set:
    - `DATABASE_URL`: the Neon connection string
-   - `RAILS_MASTER_KEY`: the value of `config/master.key` (never committed)
+   - `RAILS_MASTER_KEY`: the same value as the `RAILS_MASTER_KEY` repo secret
    - `PORT`: `80` (Thruster listens on 80 and forwards to Puma)
 4. **Settings → Networking → Generate Domain** (port `80`), then save the URL as the `RAILWAY_APP_URL` repo secret.
 

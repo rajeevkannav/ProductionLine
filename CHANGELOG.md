@@ -25,6 +25,7 @@ All notable changes to **ProductionLine (`mogra`)** are documented in this file.
 
 ### Fixed
 - Empty `rails8-pg-hotwire` repos are bootstrapped deterministically with `rails new` (`scripts/bootstrap-rails.sh`: PostgreSQL, esbuild, Tailwind, no Kamal/CI files) before the builder agent runs, instead of the model hand-writing framework files.
+- Bootstrapped Rails apps encrypt `config/credentials.yml.enc` with the spoke's `RAILS_MASTER_KEY` secret instead of a key generated (and lost) on the runner. The key is passed only to the bootstrap, deleted from the working tree afterwards, and never committed; the bootstrap fails fast when the secret is missing or malformed.
 - Rails builder checks and `verify-rails-pg` now fail when `bin/rails` / `config/application.rb` are missing or Minitest reports 0 runs (previously `rails test` outside an app printed `rails new` help and passed). The builder also runs bundler-audit, and yarn-based apps are audited for high-severity advisories.
 - Model output can no longer overwrite lockfiles (`Gemfile.lock`, `yarn.lock`, `package-lock.json`).
 - Rails spokes deploying to Render or Railway + Neon are bootstrapped for a single `DATABASE_URL` (`scripts/rails-single-db.rb`): Solid Cache/Queue/Cable tables move into a regular migration on the primary database instead of three extra databases the free plan lacks.

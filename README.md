@@ -58,6 +58,7 @@ See [`templates/spoke/README.md`](templates/spoke/README.md) for the exact step-
 | :--- | :--- | :--- |
 | `MOGRA_BOT_TOKEN` | Always | Fine-grained PAT whose **Repository access includes the spoke repo**, with Contents, Issues, Pull requests: Read and write. The same token can be stored in several spokes if its access list covers each one. |
 | `GEMINI_API_KEY` | Default harness | Or `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` for `claude-code` / `codex`. |
+| `RAILS_MASTER_KEY` | Rails stack | 32-hex key (`openssl rand -hex 16`). `mogra` encrypts the new app's `config/credentials.yml.enc` with it during `rails new`; set the same value on the host. Never committed. |
 | `RAILWAY_APP_URL` | `railway` target, optional | Public Railway URL; `mogra` polls `/up` after merge. |
 | `RENDER_DEPLOY_HOOK_URL`, `RENDER_APP_URL` | `render` target, optional | Trigger the deploy after merge and poll `/up`. |
 | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD` | Signed Android release | Not needed for debug `.apk`. |

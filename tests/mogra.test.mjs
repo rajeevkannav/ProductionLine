@@ -346,3 +346,17 @@ test('supports the Railway + Neon deploy target with its host skill and no Rende
     rmSync(spoke, { recursive: true, force: true });
   }
 });
+
+test('Rails bootstrap encrypts credentials with the spoke RAILS_MASTER_KEY and never keeps it', () => {
+  const bootstrap = readFileSync(join(ROOT, 'scripts/bootstrap-rails.sh'), 'utf8');
+  assert.match(bootstrap, /RAILS_MASTER_KEY secret is required/);
+  assert.match(bootstrap, /\^\[0-9a-f\]\{32\}\$/);
+  assert.ok(bootstrap.indexOf('> config/master.key') < bootstrap.indexOf('rails new .'));
+  assert.match(bootstrap, /rm -f config\/master\.key/);
+
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /RAILS_MASTER_KEY:\n\s+required: false/);
+  assert.match(workflow, /unset MOGRA_RAILS_MASTER_KEY/);
+  assert.ok(workflow.indexOf('unset MOGRA_RAILS_MASTER_KEY') < workflow.indexOf('run-agent.sh spoke'));
+  assert.match(workflow, /rm -f config\/master\.key config\/credentials\/\*\.key/);
+});
