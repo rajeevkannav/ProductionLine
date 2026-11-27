@@ -141,6 +141,9 @@ function collectStaticIssues(workdir) {
     if (/(?:^|[\s"'`])text-(?:slate|gray|zinc|neutral|stone)-(?:300|400)\b/.test(content)) {
       issues.push(`WCAG color-contrast violation in ${file}: light-mode \`text-slate-400\`/\`text-gray-400\` fails 4.5:1 contrast on light backgrounds (ratio ~2.5:1). Use \`text-slate-600\`/\`text-slate-700\` (and \`dark:text-slate-300\`) instead.`);
     }
+    if (!/\.(test|spec)\./.test(file) && /\bload\w*\([^)]*\)\.then\(/.test(content) && !/(cancelled|canceled|isMounted|mounted|active|AbortController)/.test(content)) {
+      issues.push(`Vitest teardown race in ${file}: async storage hydration (\`.then(...)\`) MUST check a cleanup flag (\`let active = true; ... if (active) setTodos(...); return () => { active = false; }\`) so state setters never run after jsdom unmount.`);
+    }
   }
   if (!/active/i.test(combinedSrc) || !/completed/i.test(combinedSrc) || !/(indexedDB|localStorage)/.test(combinedSrc) || !/undo/i.test(combinedSrc)) {
     issues.push('Incomplete TodoMVC+ app in src/: must include filters (All/Active/Completed), persistent IndexedDB/localStorage storage, and Undo/Redo support (not a bare add-only toy).');
@@ -246,7 +249,7 @@ async function main() {
       'Return ONLY a JSON object with shape: { "files": { "<relative-path>": "<full-file-content>" } }.',
       'Build a COMPLETE, polished, production-quality application — NO minimal toy stubs. Include ALL requested features:',
       '1. Full TodoMVC CRUD: add todo (trimmed non-empty), toggle single & toggle-all, inline edit (Enter/Blur saves, Escape cancels, empty deletes), delete todo, Clear Completed, live remaining count, All/Active/Completed filters.',
-      '2. TodoMVC+ Power Features: versioned IndexedDB persistence WITH synchronous localStorage write-through mirror on every save (and fast localStorage read fallback so immediate reloads never lose in-flight IndexedDB writes, and initial mount never overwrites persisted items with []), BroadcastChannel multi-tab sync (feature-detected), Undo/Redo history (buttons + Ctrl+Z / Ctrl+Shift+Z), prototype-pollution-safe validated JSON Export/Import, and accessible Light/Dark theme toggle.',
+      '2. TodoMVC+ Power Features: versioned IndexedDB persistence WITH synchronous localStorage write-through mirror on every save (and fast localStorage read fallback so immediate reloads never lose in-flight IndexedDB writes, and initial mount never overwrites persisted items with []; ALWAYS guard async `.then(...)` hydration with an unmount cleanup flag `let active = true; ... return () => { active = false; }` so state setters never run after jsdom teardown), BroadcastChannel multi-tab sync (feature-detected), Undo/Redo history (buttons + Ctrl+Z / Ctrl+Shift+Z), prototype-pollution-safe validated JSON Export/Import, and accessible Light/Dark theme toggle.',
       '3. Accessibility & Ultra-Modern CSS: OKLCH + light-dark() design tokens, @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast (NEVER use text-slate-400 or text-gray-400 on light surfaces — use slate-600/700 for >=4.5:1 ratio and dark:text-slate-300 in dark mode), visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
       '',
       'REQUIRED files checklist:',
