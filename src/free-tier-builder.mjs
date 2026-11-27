@@ -45,6 +45,7 @@ function listProjectFiles(root, prefix = '') {
 }
 
 async function callGeminiOnce({ apiKey, model, prompt }) {
+  const startedAt = Date.now();
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: {
@@ -70,11 +71,22 @@ async function callGeminiOnce({ apiKey, model, prompt }) {
   const payload = JSON.parse(text);
   const raw = payload.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!raw) throw new Error(`Gemini (${model}) returned empty candidate content`);
-  return JSON.parse(raw);
+  const meta = payload.usageMetadata ?? {};
+  return {
+    data: JSON.parse(raw),
+    usage: {
+      model,
+      elapsedMs: Date.now() - startedAt,
+      promptTokenCount: Number(meta.promptTokenCount ?? 0),
+      candidatesTokenCount: Number(meta.candidatesTokenCount ?? 0),
+      thoughtsTokenCount: Number(meta.thoughtsTokenCount ?? 0),
+      totalTokenCount: Number(meta.totalTokenCount ?? 0),
+    },
+  };
 }
 
 /** Call Gemini rotating across candidate models and backing off cleanly on 429/503/network timeouts. */
-async function callGeminiResilient({ apiKey, models, prompt }) {
+async function callGeminiResilient({ apiKey, models, prompt, phase = 'build', telemetry = [] }) {
   let lastErr;
   for (const backoffSec of [0, 15, 35]) {
     if (backoffSec > 0) {
@@ -84,7 +96,9 @@ async function callGeminiResilient({ apiKey, models, prompt }) {
     for (const model of models) {
       try {
         console.log(`[mogra-oneshot] calling model='${model}'...`);
-        return await callGeminiOnce({ apiKey, model, prompt });
+        const result = await callGeminiOnce({ apiKey, model, prompt });
+        telemetry.push({ phase, timestamp: new Date().toISOString(), ...result.usage });
+        return result.data;
       } catch (err) {
         lastErr = err;
         console.error(`[mogra-oneshot] ${err.message}`);
@@ -93,6 +107,32 @@ async function callGeminiResilient({ apiKey, models, prompt }) {
     }
   }
   throw lastErr;
+}
+
+/** Persist measured Gemini API token telemetry for the TodoMVC+ showcase portal. */
+export function writeRunMetrics(workdir, telemetry) {
+  if (!Array.isArray(telemetry) || telemetry.length === 0) return null;
+  const totals = telemetry.reduce(
+    (acc, call) => ({
+      calls: acc.calls + 1,
+      promptTokens: acc.promptTokens + Number(call.promptTokenCount ?? 0),
+      candidatesTokens: acc.candidatesTokens + Number(call.candidatesTokenCount ?? 0),
+      thoughtsTokens: acc.thoughtsTokens + Number(call.thoughtsTokenCount ?? 0),
+      totalTokens: acc.totalTokens + Number(call.totalTokenCount ?? 0),
+      elapsedMs: acc.elapsedMs + Number(call.elapsedMs ?? 0),
+    }),
+    { calls: 0, promptTokens: 0, candidatesTokens: 0, thoughtsTokens: 0, totalTokens: 0, elapsedMs: 0 },
+  );
+  const metrics = {
+    schemaVersion: 1,
+    provider: 'google-ai-studio-free-tier',
+    costUsd: 0,
+    generatedAt: new Date().toISOString(),
+    totals,
+    calls: telemetry,
+  };
+  writeFileSync(join(workdir, '.mogra-metrics.json'), `${JSON.stringify(metrics, null, 2)}\n`, 'utf8');
+  return metrics;
 }
 
 function collectStaticIssues(workdir) {
@@ -246,6 +286,7 @@ async function main() {
   const promptText = readFileSync(args['prompt-file'], 'utf8');
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is required');
+  const telemetry = [];
 
   if (!existsSync(join(workdir, 'package.json'))) {
     const initialPrompt = [
@@ -256,7 +297,7 @@ async function main() {
       'Build a COMPLETE, polished, production-quality application — NO minimal toy stubs. Include ALL requested features:',
       '1. Full TodoMVC CRUD: add todo (trimmed non-empty), toggle single & toggle-all, inline edit (Enter/Blur saves, Escape cancels, empty deletes), delete todo, Clear Completed, live remaining count, All/Active/Completed filters.',
       '2. TodoMVC+ Power Features: versioned IndexedDB persistence WITH synchronous localStorage write-through mirror on every save (and fast localStorage read fallback so immediate reloads never lose in-flight IndexedDB writes, and initial mount never overwrites persisted items with []; ALWAYS guard async `.then(...)` hydration with an unmount cleanup flag `let active = true; ... return () => { active = false; }` so state setters never run after jsdom teardown), BroadcastChannel multi-tab sync (feature-detected), Undo/Redo history (buttons + Ctrl+Z / Ctrl+Shift+Z), prototype-pollution-safe validated JSON Export/Import, and accessible Light/Dark theme toggle.',
-      '3. Accessibility & Ultra-Modern CSS: OKLCH + light-dark() design tokens, @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast (NEVER use text-slate-400 or text-gray-400 on light surfaces — use slate-600/700 for >=4.5:1 ratio and dark:text-slate-300 in dark mode), visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
+      '3. Accessibility, QuantumBlack Design System Aesthetic & Ultra-Modern CSS: OKLCH + light-dark() design tokens inspired by QuantumBlack (Inter + JetBrains Mono typography, dark obsidian slate-950/slate-900 default & high-contrast light Mist surface, 1px hairline borders, teal-400/sky-500 semantic accents, tabular-nums counters), @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast (NEVER use text-slate-400 or text-gray-400 on light surfaces — use slate-600/700 for >=4.5:1 ratio and dark:text-slate-300 in dark mode), visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
       '',
       'REQUIRED files checklist:',
       '- package.json (scripts: dev, typecheck: "tsc --noEmit", lint: "tsc --noEmit", test: "vitest run", build: "tsc --noEmit && vite build", test:e2e: "playwright test")',
@@ -271,7 +312,7 @@ async function main() {
       'Ensure EVERY package imported in any file (vitest, jsdom, @testing-library/react, @playwright/test, @axe-core/playwright, etc.) is declared in package.json, and `npm audit --omit=dev --audit-level=high` passes cleanly (use zero-dependency runtime TypeScript validation instead of vulnerable `zod <4.6.7`).',
     ].join('\n');
 
-    const first = await callGeminiResilient({ apiKey, models: richModels, prompt: initialPrompt });
+    const first = await callGeminiResilient({ apiKey, models: richModels, prompt: initialPrompt, phase: 'initial-build', telemetry });
     const files = writeGeneratedFiles(workdir, first.files);
     console.log(`[mogra-oneshot] Wrote ${files.length} files (${files.join(', ')}).`);
   }
@@ -279,6 +320,7 @@ async function main() {
   for (let round = 1; round <= 7; round++) {
     const check = runLocalChecks(workdir);
     if (check.ok) {
+      writeRunMetrics(workdir, telemetry);
       console.log(`[mogra-oneshot] Local typecheck, lint, unit tests, and build passed.`);
       return;
     }
@@ -310,7 +352,7 @@ async function main() {
       `Rules:\n- ${hints.join('\n- ')}`,
       'Return ONLY JSON: { "files": { "<relative-path>": "<updated-full-content>" } }.',
     ].join('\n');
-    const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt });
+    const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt, phase: `repair-${round}`, telemetry });
     const updated = writeGeneratedFiles(workdir, patched.files);
     console.log(`[mogra-oneshot] Patched ${updated.length} files (${updated.join(', ')}).`);
   }
@@ -319,6 +361,7 @@ async function main() {
   if (!finalCheck.ok) {
     throw new Error(`Build/tests still failing after surgical repair:\n${finalCheck.output}`);
   }
+  writeRunMetrics(workdir, telemetry);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
