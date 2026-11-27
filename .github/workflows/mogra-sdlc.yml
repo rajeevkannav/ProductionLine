@@ -261,7 +261,9 @@ jobs:
 
   deploy-pages:
     needs: [intake, discover-spec-build, verify-and-security]
-    if: needs.intake.outputs.hitl_enabled == 'false' && needs.discover-spec-build.outputs.pr_number != ''
+    if: >-
+      (always() && github.event_name == 'repository_dispatch') ||
+      (needs.verify-and-security.result == 'success' && needs.intake.outputs.hitl_enabled == 'false' && needs.discover-spec-build.outputs.pr_number != '')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -273,17 +275,19 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.discover-spec-build.outputs.branch }}
-          token: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
-
       - name: Auto-merge verified PR
+        if: needs.discover-spec-build.outputs.pr_number != ''
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.discover-spec-build.outputs.pr_number }}
         run: gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          token: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -307,9 +311,23 @@ jobs:
             stack_name=$(basename "$dir")
             export VITE_BASE_PATH="${ROOT_BASE}${stack_name}/"
             (cd "$dir" && npm install --no-audit --no-fund && npm run build)
-            if [ -d "${dir}/dist" ]; then
+            if [ -f "${dir}/vite.config.ts" ] || [ -f "${dir}/vite.config.mts" ] || [ -f "${dir}/vite.config.js" ]; then
+              (cd "$dir" && npx vite build --base "${VITE_BASE_PATH}")
+            elif [ -f "${dir}/angular.json" ]; then
+              (cd "$dir" && npm run build -- --base-href "${VITE_BASE_PATH}")
+            fi
+            DIST_DIR="${dir}/dist"
+            if [ -d "$DIST_DIR" ] && [ ! -f "${DIST_DIR}/index.html" ]; then
+              NESTED=$(find "$DIST_DIR" -name index.html -exec dirname {} \; | head -n1 || true)
+              [ -n "$NESTED" ] && DIST_DIR="$NESTED"
+            fi
+            if [ -f "${DIST_DIR}/index.html" ]; then
+              if grep -Eq '(src|href)="/assets/' "${DIST_DIR}/index.html"; then
+                echo "ERROR: ${DIST_DIR}/index.html still references root /assets/ instead of ${VITE_BASE_PATH}" >&2
+                exit 1
+              fi
               mkdir -p "pages-dist/${stack_name}"
-              cp -R "${dir}/dist/." "pages-dist/${stack_name}/"
+              cp -R "${DIST_DIR}/." "pages-dist/${stack_name}/"
               LINKS="${LINKS}<li><a href=\"${VITE_BASE_PATH}\">${stack_name}</a></li>"
             fi
           done
@@ -335,7 +353,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
       - name: Comment live Pages URL on Issue
-        if: steps.deployment.outputs.page_url != ''
+        if: steps.deployment.outputs.page_url != '' && github.event.issue.number != ''
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
           REPO: ${{ github.repository }}

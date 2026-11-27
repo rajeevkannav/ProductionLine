@@ -105,6 +105,12 @@ function collectStaticIssues(workdir) {
   } else if (!readFileSync(vitestCfgPath, 'utf8').includes('e2e')) {
     issues.push('vitest.config.ts MUST exclude `e2e/**` so `vitest run` never executes Playwright specs.');
   }
+  const viteCfgPath = existsSync(join(workdir, 'vite.config.ts'))
+    ? join(workdir, 'vite.config.ts')
+    : join(workdir, 'vite.config.mts');
+  if (existsSync(viteCfgPath) && !readFileSync(viteCfgPath, 'utf8').includes('VITE_BASE_PATH')) {
+    issues.push('vite.config.ts MUST set `base: process.env.VITE_BASE_PATH || "/"` for GitHub Pages subpath deployment.');
+  }
   const pwCfgPath = join(workdir, 'playwright.config.ts');
   const e2ePath = join(workdir, 'e2e/todomvc.spec.ts');
   if (!existsSync(pwCfgPath)) {
