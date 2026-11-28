@@ -34,6 +34,9 @@ export function validateConfig(cfg) {
   if (!HARNESSES[cfg.runtime?.harness]) {
     errors.push(`Unknown runtime.harness: ${cfg.runtime?.harness}`);
   }
+  if (cfg.runtime?.build && !['cloud', 'local'].includes(cfg.runtime.build)) {
+    errors.push(`Unsupported runtime.build: ${cfg.runtime.build} (cloud | local)`);
+  }
   if (!SUPPORTED_STACKS[cfg.outcome?.stack]) {
     errors.push(`Unsupported outcome.stack: ${cfg.outcome?.stack}`);
   }

@@ -143,6 +143,7 @@ export const CONVENTIONS = Object.freeze({
     },
   },
   runtime: {
+    build: 'cloud', // cloud: GitHub Actions builds from the issue; local: `mogra build` on your machine, GitHub verifies
     harness: 'gemini-cli',
     model: 'gemini-3.1-flash-lite',
     sandbox: 'worktree',

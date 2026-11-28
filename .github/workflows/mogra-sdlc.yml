@@ -46,9 +46,14 @@ jobs:
   intake:
     # Skip parent issues (mogra:epic) and queued sub-issues when they are opened; chaining starts them later.
     if: >-
-      github.event_name == 'issues' &&
-      !contains(github.event.issue.labels.*.name, 'mogra:epic') &&
-      !(github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'mogra:queued'))
+      (github.event_name == 'issues' &&
+       !contains(github.event.issue.labels.*.name, 'mogra:epic') &&
+       !(github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'mogra:queued'))) ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+       github.event.label.name == 'mogra:built' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.user.login == github.repository_owner &&
+       startsWith(github.event.pull_request.head.ref, 'mogra/issue-'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -64,6 +69,10 @@ jobs:
       subpath: ${{ steps.route.outputs.subpath }}
       verify_profile: ${{ steps.route.outputs.verify_profile }}
       deploy_health_path: ${{ steps.route.outputs.deploy_health_path }}
+      build_mode: ${{ steps.route.outputs.build_mode }}
+      issue_number: ${{ steps.issue.outputs.number }}
+      local_pr: ${{ steps.issue.outputs.local_pr }}
+      local_branch: ${{ steps.issue.outputs.local_branch }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,17 +90,37 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Resolve the issue (from the issue event, or from a locally built PR's branch)
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ISSUE: ${{ github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            NUMBER=$(printf '%s' "$PR_BRANCH" | sed -nE 's#^mogra/issue-([0-9]+)-.*#\1#p')
+            [ -n "$NUMBER" ] || { echo "::error::Cannot read the issue number from branch $PR_BRANCH"; exit 1; }
+            echo "local_pr=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "local_branch=${PR_BRANCH}" >> "$GITHUB_OUTPUT"
+          else
+            NUMBER="$EVENT_ISSUE"
+          fi
+          gh issue view "$NUMBER" -R "$REPO" --json title,body,labels > /tmp/issue.json
+          echo "number=${NUMBER}" >> "$GITHUB_OUTPUT"
+
       - name: Route issue & update stack metadata
         id: route
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
           REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
         run: |
-          printf '%s' "$ISSUE_BODY" > /tmp/issue-body.md
-          LABELS=$(jq -r '[.issue.labels[].name] | join(",")' "$GITHUB_EVENT_PATH")
+          ISSUE_TITLE=$(jq -r '.title' /tmp/issue.json)
+          jq -r '.body // ""' /tmp/issue.json > /tmp/issue-body.md
+          LABELS=$(jq -r '[.labels[].name] | join(",")' /tmp/issue.json)
           CFG=$(node control-plane/src/cli.mjs resolve-config --control-plane control-plane --spoke spoke)
           RES=$(node control-plane/src/cli.mjs route-issue --control-plane control-plane --spoke spoke --title "$ISSUE_TITLE" --body-file /tmp/issue-body.md --labels "$LABELS")
 
@@ -113,10 +142,13 @@ jobs:
           echo "subpath=$(printf '%s' "$RES" | jq -r '.stackProfile.subpath // ""')" >> "$GITHUB_OUTPUT"
           echo "verify_profile=$(printf '%s' "$RES" | jq -r '.stackProfile.verifyProfile // "node-spa"')" >> "$GITHUB_OUTPUT"
           echo "deploy_health_path=$(printf '%s' "$CFG" | jq -r '(.deployment[.deployment.target // ""] // {}).health_path? // "/up"')" >> "$GITHUB_OUTPUT"
+          echo "build_mode=$(printf '%s' "$CFG" | jq -r '.runtime.build // "cloud"')" >> "$GITHUB_OUTPUT"
 
   discover-spec-build:
     needs: intake
-    if: needs.intake.outputs.hitl_enabled == 'false' || contains(github.event.issue.labels.*.name, 'mogra:approved')
+    if: >-
+      (needs.intake.outputs.hitl_enabled == 'false' || contains(github.event.issue.labels.*.name, 'mogra:approved')) &&
+      (github.event_name == 'pull_request' || needs.intake.outputs.build_mode != 'local')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -124,15 +156,17 @@ jobs:
       issues: write
       pull-requests: write
     outputs:
-      pr_number: ${{ steps.pr.outputs.pr_number }}
-      branch: ${{ steps.pr.outputs.branch }}
+      pr_number: ${{ steps.pr.outputs.pr_number || needs.intake.outputs.local_pr }}
+      branch: ${{ steps.pr.outputs.branch || needs.intake.outputs.local_branch }}
     steps:
       - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request'
         with:
           path: spoke
           token: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
 
       - uses: actions/checkout@v4
+        if: github.event_name != 'pull_request'
         with:
           repository: ${{ inputs.control_plane_repo }}
           ref: ${{ inputs.control_plane_ref }}
@@ -140,15 +174,17 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-node@v4
+        if: github.event_name != 'pull_request'
         with:
           node-version: "22"
 
       - uses: actions/setup-python@v5
+        if: github.event_name != 'pull_request'
         with:
           python-version: "3.11"
 
       - name: Setup Ruby & PostgreSQL for Rails incremental builds
-        if: needs.intake.outputs.verify_profile == 'rails-pg'
+        if: github.event_name != 'pull_request' && (needs.intake.outputs.verify_profile == 'rails-pg')
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ hashFiles('spoke/.ruby-version') != '' && 'default' || '3.4' }}
@@ -156,7 +192,7 @@ jobs:
           bundler-cache: true
 
       - name: Start local PostgreSQL for Rails builder checks
-        if: needs.intake.outputs.verify_profile == 'rails-pg'
+        if: github.event_name != 'pull_request' && (needs.intake.outputs.verify_profile == 'rails-pg')
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq postgresql libpq-dev libvips
           sudo service postgresql start
@@ -164,6 +200,7 @@ jobs:
           echo "DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/jumpstart_test" >> "$GITHUB_ENV"
 
       - name: Resolve agent plans & execute configured harness
+        if: github.event_name != 'pull_request'
         id: build
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
@@ -207,6 +244,7 @@ jobs:
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
 
       - name: Commit & open PR
+        if: github.event_name != 'pull_request'
         id: pr
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
@@ -812,11 +850,11 @@ jobs:
           esac
 
       - name: Comment deployment status on Issue
-        if: ${{ !cancelled() && github.event.issue.number != '' }}
+        if: ${{ !cancelled() && needs.intake.outputs.issue_number != '' }}
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
           REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NUMBER: ${{ needs.intake.outputs.issue_number }}
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
           HOSTED_STATUS: ${{ steps.render_deploy.outputs.status || steps.railway_deploy.outputs.status }}
           DEPLOY_TARGET: ${{ needs.intake.outputs.deploy_target }}
@@ -834,11 +872,12 @@ jobs:
         # Needs MOGRA_BOT_TOKEN: label events made with github.token do not trigger workflows.
         # Only move on when the live app is verified healthy (Railway target) or the target has no live check.
         if: >-
-          success() && github.event.issue.number != '' &&
+          success() && needs.intake.outputs.issue_number != '' &&
           (needs.intake.outputs.deploy_target != 'railway' || steps.railway_deploy.outputs.healthy == 'true')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN }}
           REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: node .mogra-control-plane/src/sub-issue-chain.mjs --repo "$REPO" --issue "$ISSUE_NUMBER"
+          ISSUE_NUMBER: ${{ needs.intake.outputs.issue_number }}
+          BUILD_MODE: ${{ needs.intake.outputs.build_mode }}
+        run: node .mogra-control-plane/src/sub-issue-chain.mjs --repo "$REPO" --issue "$ISSUE_NUMBER" --mode "$BUILD_MODE"

@@ -10,6 +10,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { callGeminiResilient, writeGeneratedFiles, writeRunMetrics } from './free-tier-builder.mjs';
+import { checkpoint, changedSince, claudeInstructions, enforceGuards, runClaude, writeClaudeMetrics } from './claude-provider.mjs';
 
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'log', 'storage', 'vendor', '.gradle', 'build', 'DerivedData', 'dist']);
 const CONTEXT_EXTENSIONS = /\.(rb|erb|rake|js|mjs|ts|tsx|css|html|json|yml|yaml|sh|kt|kts|swift|xml|plist|md)$/i;
@@ -269,6 +270,13 @@ export function parseAllowedFiles(spec = '') {
   return globs.length ? globs : null;
 }
 
+/** Predicate for the issue's allowed files (always true when the issue declares none). */
+export function allowedMatcher(globs = null) {
+  if (!globs) return () => true;
+  const patterns = globs.map(globToRegExp);
+  return (path) => patterns.some((re) => re.test(String(path).replace(/^\/+/, '')));
+}
+
 /** Keep only model writes inside the issue's allowed files (when the issue declares them). */
 export function withinAllowedFiles(filesMap = {}, globs = null) {
   if (!globs) return filesMap;
@@ -372,6 +380,10 @@ async function main() {
   );
   const workdir = resolve(args.workdir ?? '.');
   const stack = args.stack ?? 'rails8-pg-hotwire';
+  if (args.provider === 'claude-code') {
+    await mainClaude({ workdir, stack, model: args.model ?? 'sonnet', promptText: readFileSync(args['prompt-file'], 'utf8') });
+    return;
+  }
   const primaryModel = args.model ?? 'gemini-3.1-flash-lite';
   const envCandidates = (process.env.MOGRA_CANDIDATES ?? '').split(/\s+/).filter(Boolean);
   // Quality first: editing an existing app needs the stronger Flash models. Rotate across them
@@ -486,6 +498,57 @@ async function main() {
   if (!finalCheck.ok) {
     throw new Error(`Incremental verification failed after ${rounds} repair rounds:\n${finalCheck.output}`);
   }
+}
+
+/** Claude Code flow: Claude edits the tree; mogra checkpoints, reverts disallowed changes, and verifies. */
+async function mainClaude({ workdir, stack, model, promptText }) {
+  const telemetry = [];
+  const base = checkpoint(workdir, 'base');
+  const generators = stack === 'rails8-pg-hotwire' ? parseGenerators(promptText) : [];
+  const generated = runGenerators(workdir, generators);
+  const locked = new Set(generated.created.filter((p) => !p.startsWith('test/')));
+  const allowedFiles = parseAllowedFiles(promptText);
+  const rules = { locked, allowedFiles, matchesAllowed: allowedMatcher(allowedFiles) };
+  const instructions = claudeInstructions({ stack, generators, locked, allowedFiles });
+  // Generator output is part of this change but belongs to mogra, not to the model: checkpoint it.
+  let ref = checkpoint(workdir, 'generators');
+
+  runClaude({ workdir, model, phase: 'incremental-build', telemetry, prompt: `${promptText}\n${instructions}` });
+  enforceGuards(workdir, ref, rules);
+
+  const rounds = Math.max(1, Number(process.env.MOGRA_REPAIR_ROUNDS) || 4);
+  for (let round = 1; round <= rounds; round++) {
+    const changed = new Set(changedSince(workdir, base));
+    const check = checkChange(workdir, stack, changed);
+    if (check.ok) {
+      writeClaudeMetrics(workdir, telemetry);
+      console.log(`[mogra-claude] Verification passed for ${stack}.`);
+      return;
+    }
+    console.error(`[mogra-claude] Check failed (round ${round}); asking Claude to repair:\n${check.output}`);
+    ref = checkpoint(workdir, `repair-${round}`);
+    runClaude({
+      workdir,
+      model,
+      phase: `repair-${round}`,
+      telemetry,
+      prompt: [
+        promptText,
+        instructions,
+        '',
+        `## mogra's checks failed (round ${round})`,
+        'Fix the cause of the errors below without breaking existing features. Keep the rules above.',
+        '```',
+        check.output,
+        '```',
+      ].join('\n'),
+    });
+    enforceGuards(workdir, ref, rules);
+  }
+
+  const finalCheck = checkChange(workdir, stack, new Set(changedSince(workdir, base)));
+  writeClaudeMetrics(workdir, telemetry);
+  if (!finalCheck.ok) throw new Error(`Verification failed after ${rounds} Claude repair rounds:\n${finalCheck.output}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

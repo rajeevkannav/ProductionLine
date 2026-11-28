@@ -52,6 +52,26 @@ See [`templates/spoke/README.md`](templates/spoke/README.md) for the exact step-
 
 **Rails spoke (v0.2.0):** copy [`templates/spoke-rails/`](templates/spoke-rails/) instead. It adds `.mogra.yaml` (`rails8-pg-hotwire`, `incremental-feature`, `deployment.target: railway`), CodeQL, and issue templates. Skip the GitHub Pages step; after the first PR merges, create a Neon database and a Railway service from the repo, then set `DATABASE_URL` and `RAILS_MASTER_KEY`. Neither needs a credit card, so the app can never be billed: when Railway's free credit runs out the service stops. Render (`deployment.target: render`) is still supported but asks for a card. Full guide: [`templates/spoke-rails/README.md`](templates/spoke-rails/README.md).
 
+### Local builds with Claude Code (`runtime.build: local`)
+
+Build on your own machine with your Claude subscription while GitHub keeps verifying, merging, deploying and chaining:
+
+```sh
+node src/local-runner.mjs build --repo <owner>/<repo> --issue 17   # build one issue
+node src/local-runner.mjs next  --repo <owner>/<repo>              # build the issue the chain marked mogra:next
+```
+
+The runner reads the issue (only issues opened by the repository owner), works in a separate worktree under `~/.mogra/`, runs the issue's Generators, lets Claude Code (`claude -p`, or `MOGRA_CLAUDE_BIN`) edit the app and run the tests, reverts anything outside mogra's rules (protected paths, generated app code, the issue's Files list, append-only Gemfile), runs the same checks as the cloud builder against a throwaway PostgreSQL, then pushes a single commit and opens a PR labelled `mogra:built`. That label starts the GitHub verify job (tests, scans, UI review); after merge and a verified deploy, the chain labels the next sub-issue `mogra:next` instead of starting a cloud build. No AI key is needed on GitHub in this mode. Set it in the spoke's `.mogra.yaml`:
+
+```yaml
+runtime:
+  build: local
+  harness: claude-code
+  model: sonnet
+```
+
+and add `pull_request: { types: [labeled] }` to the spoke's workflow caller.
+
 ### Sub-issue chains
 
 Large features run more reliably as small issues. Create a parent issue labelled `mogra:epic` (mogra never builds it) and add the steps as GitHub **sub-issues** in order, each labelled `mogra:queued` so opening them does not start a run. Start the first one with the `mogra:run` label. Each time a sub-issue is verified, merged and deployed, `mogra` starts the parent's next open sub-issue; after the last one it closes the parent. Parents can themselves be sub-issues of a roadmap epic: when a milestone closes, `mogra` moves on to the next milestone's first open sub-issue, and pauses (with a comment) at a milestone that has no sub-issues yet. The chain only moves on after the deploy is verified live (on Railway, `/up` returns 200 for the merged commit). A failed run stops the chain: fix and re-run that sub-issue with `mogra:run`, and the chain continues. Chaining uses `MOGRA_BOT_TOKEN` (events from `github.token` do not trigger workflows).

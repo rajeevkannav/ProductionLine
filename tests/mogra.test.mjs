@@ -511,3 +511,40 @@ test('verify job reviews the UI: screenshots signed out and in, 320px reflow, PR
   const smoke = readFileSync(join(ROOT, 'scripts/rails-production-smoke.rb'), 'utf8');
   assert.match(smoke, /references no \/assets\/\*\.css stylesheet/);
 });
+
+test('local build mode: config, chain, workflow and Claude guards', async () => {
+  const spoke = mkdtempSync(join(tmpdir(), 'mogra-local-'));
+  try {
+    writeFileSync(join(spoke, '.mogra.yaml'), ['version: 1', 'runtime:', '  build: local', '  harness: claude-code', '  model: sonnet', 'outcome:', '  stack: rails8-pg-hotwire', '  mode: incremental-feature'].join('\n'));
+    const cfg = loadConfig({ controlPlaneDir: ROOT, spokeDir: spoke });
+    assert.equal(cfg.runtime.build, 'local');
+    assert.equal(loadConfig({ controlPlaneDir: ROOT }).runtime.build, 'cloud');
+    writeFileSync(join(spoke, '.mogra.yaml'), ['version: 1', 'runtime:', '  build: laptop'].join('\n'));
+    assert.throws(() => loadConfig({ controlPlaneDir: ROOT, spokeDir: spoke }), /runtime\.build/);
+  } finally {
+    rmSync(spoke, { recursive: true, force: true });
+  }
+
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /github\.event\.label\.name == 'mogra:built'/);
+  assert.match(workflow, /github\.event\.pull_request\.user\.login == github\.repository_owner/);
+  assert.match(workflow, /needs\.intake\.outputs\.build_mode != 'local'/);
+  assert.match(workflow, /--mode "\$BUILD_MODE"/);
+
+  const { isAllowedChange, appendOnlyGemfile } = await import('../src/claude-provider.mjs');
+  const rules = { locked: new Set(['app/controllers/sessions_controller.rb']), allowedFiles: ['app/views/**'], matchesAllowed: (p) => p.startsWith('app/views/') };
+  assert.equal(isAllowedChange('.github/workflows/mogra.yml', rules), false);
+  assert.equal(isAllowedChange('.mogra.yaml', rules), false);
+  assert.equal(isAllowedChange('app/controllers/sessions_controller.rb', rules), false);
+  assert.equal(isAllowedChange('app/models/user.rb', rules), false);
+  assert.equal(isAllowedChange('app/views/pages/home.html.erb', rules), true);
+  assert.equal(isAllowedChange('Gemfile.lock', rules), true);
+  const merged = appendOnlyGemfile('gem "rails", "~> 8.1"\ngem "pg"\n', 'gem "rails", "~> 8.0"\ngem "bcrypt"\n');
+  assert.match(merged, /gem "rails", "~> 8\.1"/);
+  assert.match(merged, /gem "pg"/);
+  assert.match(merged, /gem "bcrypt"/);
+
+  const { changeTitle } = await import('../src/local-runner.mjs');
+  assert.equal(changeTitle('feat(security): add sudo mode', 17, 'rails8-pg-hotwire'), 'feat(security): add sudo mode (#17)');
+  assert.equal(changeTitle('Add sudo mode', 17, 'rails8-pg-hotwire'), 'feat(rails8-pg-hotwire): Add sudo mode (#17)');
+});

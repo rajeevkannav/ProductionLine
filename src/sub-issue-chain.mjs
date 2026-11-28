@@ -10,12 +10,15 @@
  *   no open sibling                             -> close the parent, move up and repeat
  *   next sibling is an epic without sub-issues  -> pause the chain on that epic
  *
- * Usage (deploy job): GH_TOKEN=... node sub-issue-chain.mjs --repo owner/name --issue 13
+ * Usage (deploy job): GH_TOKEN=... node sub-issue-chain.mjs --repo owner/name --issue 13 [--mode cloud|local]
+ * In local build mode the next issue is labelled mogra:next (built by `mogra build`/`next` on your
+ * machine) instead of mogra:run (built by GitHub Actions).
  */
 
 export const EPIC_LABEL = 'mogra:epic';
 export const QUEUED_LABEL = 'mogra:queued';
 export const RUN_LABEL = 'mogra:run';
+export const NEXT_LABEL = 'mogra:next';
 
 const isEpic = (issue) => (issue.labels ?? []).some((l) => (typeof l === 'string' ? l : l?.name) === EPIC_LABEL);
 
@@ -94,13 +97,17 @@ async function main() {
     await api.close(number);
     console.log(`[mogra] Closed #${number}: all sub-issues done.`);
   }
+  const local = args.mode === 'local';
   if (plan.next) {
     await api.removeLabel(plan.next.number, QUEUED_LABEL);
-    await api.removeLabel(plan.next.number, RUN_LABEL);
-    await api.addLabel(plan.next.number, RUN_LABEL);
+    await api.removeLabel(plan.next.number, local ? NEXT_LABEL : RUN_LABEL);
+    await api.addLabel(plan.next.number, local ? NEXT_LABEL : RUN_LABEL);
     const parent = await api.parent(plan.next.number);
-    if (parent) await api.comment(parent.number, `ProductionLine (\`mogra\`): #${issue} merged and deployed; starting #${plan.next.number}.`);
-    console.log(`[mogra] Started #${plan.next.number}.`);
+    const action = local
+      ? `#${plan.next.number} is next: build it locally with \`node src/local-runner.mjs next --repo ${args.repo}\``
+      : `starting #${plan.next.number}`;
+    if (parent) await api.comment(parent.number, `ProductionLine (\`mogra\`): #${issue} merged and deployed; ${action}.`);
+    console.log(`[mogra] ${local ? 'Marked' : 'Started'} #${plan.next.number}${local ? ` (${NEXT_LABEL})` : ''}.`);
   } else if (plan.paused) {
     await api.comment(
       plan.paused.number,

@@ -35,6 +35,7 @@
           "type": "string",
           "enum": ["antigravity", "gemini-cli", "claude-code", "codex", "goose", "openhands", "aider"]
         },
+        "build": { "type": "string", "enum": ["cloud", "local"] },
         "model": { "type": "string" },
         "sandbox": { "type": "string", "enum": ["worktree", "docker", "github-runner"] }
       }
