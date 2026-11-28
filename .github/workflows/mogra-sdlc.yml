@@ -718,11 +718,6 @@ jobs:
           for dir in stacks/*; do
             [ -f "${dir}/package.json" ] || continue
             stack_name=$(basename "$dir")
-            if [ "$stack_name" = "react19-ts-vite" ] && [ -f ".mogra-control-plane/src/themes/react19-qb-light.css" ] && [ -f "${dir}/src/index.css" ]; then
-              if ! grep -q "quantumblack-light-theme" "${dir}/src/index.css"; then
-                cp -f ".mogra-control-plane/src/themes/react19-qb-light.css" "${dir}/src/index.css"
-              fi
-            fi
             export VITE_BASE_PATH="${ROOT_BASE}${stack_name}/"
             (cd "$dir" && npm install --no-audit --no-fund && npm run build)
             if [ -f "${dir}/angular.json" ]; then
@@ -749,6 +744,12 @@ jobs:
               fi
             fi
           done
+
+          # One shared look for every stack: link the TodoMVC+ theme into each built index.html.
+          node .mogra-control-plane/src/pages-theme.mjs \
+            --pages-dir pages-dist \
+            --root-base "${ROOT_BASE}" \
+            --stacks "${BUILT_STACKS}"
 
           node .mogra-control-plane/src/pages-portal.mjs \
             --repo "${GITHUB_REPOSITORY}" \

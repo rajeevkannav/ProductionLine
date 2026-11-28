@@ -12,6 +12,7 @@ import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
 import { countMinitestRuns, mergeGemfile, missingTestChanges, parseGenerators, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
 import { generateShowcasePortal } from '../src/pages-portal.mjs';
+import { applyTheme, injectThemeLink, THEME_SOURCE } from '../src/pages-theme.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -214,12 +215,40 @@ test('showcase portal renders QuantumBlack UI, GitHub timeline, measured & pre-t
   }
 });
 
-test('react19-ts-vite CSS-only QuantumBlack light theme keeps Tailwind v4 and safe light tokens', () => {
-  const css = readFileSync(join(ROOT, 'src', 'themes', 'react19-qb-light.css'), 'utf8');
-  assert.match(css, /@import "tailwindcss";/);
+test('shared TodoMVC+ theme is light-only, unlayered and framework-neutral', () => {
+  const css = readFileSync(THEME_SOURCE, 'utf8');
   assert.match(css, /color-scheme:\s*light;/);
   assert.doesNotMatch(css, /prefers-color-scheme:\s*dark/);
+  assert.doesNotMatch(css, /^\s*@(import|layer)\b/m,'unlayered rules must beat each stack\'s own layered styles');
   assert.match(css, /overflow-wrap:\s*anywhere;/);
+  assert.match(css, /prefers-reduced-motion/);
+  assert.match(css, /forced-colors/);
+});
+
+test('pages theme links the shared stylesheet into every built stack once', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'mogra-theme-'));
+  try {
+    for (const stack of ['react19-ts-vite', 'angular-ts']) {
+      mkdirSync(join(tmp, stack));
+      writeFileSync(join(tmp, stack, 'index.html'), '<html><head><title>x</title></head><body></body></html>');
+    }
+    const { href, themed } = applyTheme({ pagesDir: tmp, rootBase: '/TodoMVC-Plus', stacks: ['react19-ts-vite', 'angular-ts', 'vue3-ts-vite'] });
+    assert.deepEqual(themed, ['react19-ts-vite', 'angular-ts'], 'stacks without a build are skipped');
+    assert.match(href, /^\/TodoMVC-Plus\/_mogra\/todomvc-theme\.css\?v=[0-9a-f]{10}$/);
+    assert.equal(readFileSync(join(tmp, '_mogra', 'todomvc-theme.css'), 'utf8'), readFileSync(THEME_SOURCE, 'utf8'));
+    const html = readFileSync(join(tmp, 'angular-ts', 'index.html'), 'utf8');
+    assert.match(html, new RegExp(`<link rel="stylesheet" href="${href.replace(/[?.]/g, '\\$&')}" data-mogra-theme>\\n</head>`));
+    applyTheme({ pagesDir: tmp, rootBase: '/TodoMVC-Plus/', stacks: ['angular-ts'] });
+    assert.equal(readFileSync(join(tmp, 'angular-ts', 'index.html'), 'utf8').match(/data-mogra-theme/g).length, 1);
+    assert.throws(() => applyTheme({ pagesDir: tmp, stacks: ['../etc'] }), /Invalid stack name/);
+    assert.throws(() => injectThemeLink('<html><body></body></html>', '/x.css'), /no <\/head>/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /src\/pages-theme\.mjs/);
+  assert.doesNotMatch(workflow, /react19-qb-light/);
 });
 
 test('supports Rails 8 + Render + Hotwire Native mobile incremental-feature spoke configuration', () => {
