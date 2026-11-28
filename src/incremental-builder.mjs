@@ -143,7 +143,10 @@ export function mergeGemfile(filesMap = {}, workdir = '.') {
 /** A change to application code or routes must come with test changes. */
 export function missingTestChanges(paths = []) {
   const list = [...paths];
-  const touchesApp = list.some((p) => p.startsWith('app/') || p === 'config/routes.rb' || p.startsWith('lib/'));
+  // Behaviour code needs tests; views, styles and helpers are covered by the production smoke
+  // check and the UI review, and forcing test edits for them makes models break working tests.
+  const BEHAVIOUR = /^app\/(controllers|models|jobs|mailers|channels|services|policies)\//;
+  const touchesApp = list.some((p) => BEHAVIOUR.test(p) || p === 'config/routes.rb' || p.startsWith('lib/'));
   const touchesTests = list.some((p) => p.startsWith('test/'));
   return touchesApp && !touchesTests;
 }

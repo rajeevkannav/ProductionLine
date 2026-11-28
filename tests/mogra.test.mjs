@@ -403,6 +403,8 @@ test('application changes without test changes are rejected', () => {
   assert.equal(missingTestChanges(['app/models/user.rb', 'config/routes.rb']), true);
   assert.equal(missingTestChanges(['app/models/user.rb', 'test/models/user_test.rb']), false);
   assert.equal(missingTestChanges(['Gemfile', 'README.md']), false);
+  assert.equal(missingTestChanges(['app/views/sessions/new.html.erb', 'config/environments/production.rb']), false);
+  assert.equal(missingTestChanges(['app/assets/stylesheets/application.tailwind.css', 'app/helpers/application_helper.rb']), false);
 });
 
 test('Rails route check script ships with the control plane', () => {
