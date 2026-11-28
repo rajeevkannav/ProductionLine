@@ -11,6 +11,12 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { callGeminiResilient, writeGeneratedFiles, writeRunMetrics } from './free-tier-builder.mjs';
 import { checkpoint, changedSince, claudeInstructions, enforceGuards, runClaude, writeClaudeMetrics } from './claude-provider.mjs';
+import { SUPPORTED_STACKS } from './conventions.mjs';
+
+/** Folder a stack's code lives in, relative to the repository root ('' for repo-root stacks). */
+export function stackScope(stack) {
+  return SUPPORTED_STACKS[stack]?.layout === 'stacks-subpath' ? `stacks/${stack}/` : '';
+}
 
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'log', 'storage', 'vendor', '.gradle', 'build', 'DerivedData', 'dist']);
 const CONTEXT_EXTENSIONS = /\.(rb|erb|rake|js|mjs|ts|tsx|css|html|json|yml|yaml|sh|kt|kts|swift|xml|plist|md)$/i;
@@ -189,9 +195,36 @@ function runCommand(cmd, cwd, timeout = 180_000) {
   });
 }
 
+// Same secret scan as the verify job, when gitleaks is installed (catches hard-coded test passwords).
+// Scan only what would be committed (tracked + untracked, not gitignored: no log/, tmp/,
+// node_modules/), verbosely so the model sees file and line of each finding.
+const GITLEAKS_SCAN =
+  'if command -v gitleaks >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then ' +
+  'scan=$(mktemp -d) && git ls-files -co --exclude-standard -z | rsync -a --from0 --files-from=- . "$scan"/ && ' +
+  'gitleaks detect --source "$scan" --no-git --redact --no-banner --no-color -v --exit-code 1; status=$?; rm -rf "$scan"; exit $status; fi';
+
+/** The verify-node-spa job's checks, run in the stack folder (set MOGRA_SKIP_E2E=1 to leave Playwright to GitHub). */
+export function nodeCheckCommands(pkg = {}, env = process.env) {
+  const scripts = pkg.scripts ?? {};
+  return [
+    'npm install --no-audit --no-fund',
+    ...['typecheck', 'lint'].filter((s) => scripts[s]).map((s) => `npm run ${s}`),
+    ...(scripts.test ? ['npm test'] : []),
+    ...(scripts['test:e2e'] && env.MOGRA_SKIP_E2E !== '1' ? ['npx playwright install chromium', 'npm run test:e2e'] : []),
+    'npm run build',
+    'npm audit --omit=dev --audit-level=high',
+    GITLEAKS_SCAN,
+  ];
+}
+
 function runStackChecks(workdir, stack) {
   try {
-    if (stack === 'rails8-pg-hotwire') {
+    if (SUPPORTED_STACKS[stack]?.runtime === 'node') {
+      const dir = join(workdir, stackScope(stack));
+      if (!existsSync(join(dir, 'package.json'))) return { ok: false, output: `Missing ${stackScope(stack)}package.json.` };
+      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+      for (const cmd of nodeCheckCommands(pkg)) runCommand(cmd, dir, 300_000);
+    } else if (stack === 'rails8-pg-hotwire') {
       const missing = RAILS_APP_MARKERS.filter((f) => !existsSync(join(workdir, f)));
       if (missing.length > 0) {
         return { ok: false, output: `Not a Rails application: missing ${missing.join(', ')}.` };
@@ -222,13 +255,7 @@ function runStackChecks(workdir, stack) {
       // Same secret scan as the verify job, when gitleaks is installed (catches hard-coded test passwords).
       // Scan only what would be committed (tracked + untracked, not gitignored: no log/, tmp/,
       // node_modules/), verbosely so the model sees file and line of each finding.
-      runCommand(
-        'if command -v gitleaks >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then ' +
-          'scan=$(mktemp -d) && git ls-files -co --exclude-standard -z | rsync -a --from0 --files-from=- . "$scan"/ && ' +
-          'gitleaks detect --source "$scan" --no-git --redact --no-banner --no-color -v --exit-code 1; status=$?; rm -rf "$scan"; exit $status; fi',
-        workdir,
-        120_000,
-      );
+      runCommand(GITLEAKS_SCAN, workdir, 120_000);
       runCommand('if bundle exec bundle-audit --help >/dev/null 2>&1; then bundle exec bundle-audit check --update; fi', workdir, 120_000);
     } else if (stack === 'android-hotwire-native') {
       if (existsSync(join(workdir, 'gradlew'))) {
@@ -519,12 +546,16 @@ async function mainClaude({ workdir, stack, model, promptText }) {
   const generated = runGenerators(workdir, generators);
   const locked = new Set(generated.created.filter((p) => !p.startsWith('test/')));
   const allowedFiles = parseAllowedFiles(promptText);
-  const rules = { locked, allowedFiles, matchesAllowed: allowedMatcher(allowedFiles) };
-  const instructions = claudeInstructions({ stack, generators, locked, allowedFiles });
+  const scope = stackScope(stack) || null;
+  const rules = { locked, allowedFiles, matchesAllowed: allowedMatcher(allowedFiles), scope };
+  const instructions = claudeInstructions({ stack, generators, locked, allowedFiles, scope });
+  // Claude works inside the stack's folder; mogra's checkpoints and guards cover the whole repo.
+  const cwd = scope ? join(workdir, scope) : workdir;
+  const metricsDir = cwd;
   // Generator output is part of this change but belongs to mogra, not to the model: checkpoint it.
   let ref = checkpoint(workdir, 'generators');
 
-  runClaude({ workdir, model, phase: 'incremental-build', telemetry, prompt: `${promptText}\n${instructions}` });
+  runClaude({ workdir, cwd, model, phase: 'incremental-build', telemetry, prompt: `${promptText}\n${instructions}` });
   enforceGuards(workdir, ref, rules);
 
   const rounds = Math.max(1, Number(process.env.MOGRA_REPAIR_ROUNDS) || 4);
@@ -532,7 +563,7 @@ async function mainClaude({ workdir, stack, model, promptText }) {
     const changed = new Set(changedSince(workdir, base));
     const check = checkChange(workdir, stack, changed);
     if (check.ok) {
-      writeClaudeMetrics(workdir, telemetry);
+      writeClaudeMetrics(metricsDir, telemetry);
       console.log(`[mogra-claude] Verification passed for ${stack}.`);
       return;
     }
@@ -540,6 +571,7 @@ async function mainClaude({ workdir, stack, model, promptText }) {
     ref = checkpoint(workdir, `repair-${round}`);
     runClaude({
       workdir,
+      cwd,
       model,
       phase: `repair-${round}`,
       telemetry,
@@ -558,7 +590,7 @@ async function mainClaude({ workdir, stack, model, promptText }) {
   }
 
   const finalCheck = checkChange(workdir, stack, new Set(changedSince(workdir, base)));
-  writeClaudeMetrics(workdir, telemetry);
+  writeClaudeMetrics(metricsDir, telemetry);
   if (!finalCheck.ok) throw new Error(`Verification failed after ${rounds} Claude repair rounds:\n${finalCheck.output}`);
 }
 

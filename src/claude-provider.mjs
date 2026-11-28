@@ -24,6 +24,11 @@ const ALLOWED_TOOLS = [
   'Bash(bundle:*)',
   'Bash(yarn:*)',
   'Bash(npm run:*)',
+  'Bash(npm install:*)',
+  'Bash(npm test:*)',
+  'Bash(npx vitest:*)',
+  'Bash(npx tsc:*)',
+  'Bash(npx playwright:*)',
   'Bash(npx @tailwindcss/cli:*)',
   'Bash(git status:*)',
   'Bash(git diff:*)',
@@ -55,8 +60,10 @@ export function changedSince(workdir, ref) {
 }
 
 /** Decide whether Claude may change `path` this run. */
-export function isAllowedChange(path, { locked = new Set(), allowedFiles = null, matchesAllowed = () => true } = {}) {
+export function isAllowedChange(path, { locked = new Set(), allowedFiles = null, matchesAllowed = () => true, scope = null } = {}) {
   if (PROTECTED.some((re) => re.test(path))) return false;
+  // A stack that lives in a subfolder (stacks/<stack>/) may only change that folder.
+  if (scope && !path.startsWith(scope)) return false;
   if (locked.has(path)) return false;
   if (allowedFiles && !matchesAllowed(path)) {
     // Files the tools regenerate (lockfiles, schema, build output) follow from allowed edits.
@@ -103,7 +110,7 @@ function claudeBin() {
 }
 
 /** Run one headless Claude Code pass in `workdir`; returns { result, costUsd, usage }. */
-export function runClaude({ workdir, prompt, model = 'sonnet', phase = 'build', telemetry = [] }) {
+export function runClaude({ workdir, cwd = workdir, prompt, model = 'sonnet', phase = 'build', telemetry = [] }) {
   const started = Date.now();
   const raw = execFileSync(
     claudeBin(),
@@ -117,7 +124,7 @@ export function runClaude({ workdir, prompt, model = 'sonnet', phase = 'build', 
       '--disallowedTools', DISALLOWED_TOOLS.join(','),
     ],
     {
-      cwd: workdir,
+      cwd,
       input: prompt,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'inherit'],
@@ -150,7 +157,8 @@ export function runClaude({ workdir, prompt, model = 'sonnet', phase = 'build', 
 }
 
 /** Instructions appended to the issue prompt for Claude Code (it edits files instead of returning JSON). */
-export function claudeInstructions({ stack, generators = [], locked = new Set(), allowedFiles = null }) {
+export function claudeInstructions({ stack, generators = [], locked = new Set(), allowedFiles = null, scope = null }) {
+  if (scope) return nodeStackInstructions({ stack, allowedFiles, scope });
   return [
     '',
     '## How to work (mogra, Claude Code)',
@@ -165,6 +173,22 @@ export function claudeInstructions({ stack, generators = [], locked = new Set(),
     '- Test behaviour (responses, redirects, records, emails, visible text), never CSS class names or element counts.',
     '- Never hard-code password-like strings in tests (the Gitleaks secret scan fails the PR): use one helper such as `def test_password = "x" * 16` or `SecureRandom.alphanumeric(16)`.',
     '- After you finish, mogra independently runs: a fresh database built from migrations, `bin/rails test`, RuboCop, Brakeman, bundler-audit, a route check (every route has a controller), a Gitleaks secret scan, and a production smoke check (production config boots, CSS/JS served, no 5xx, no SMTP to localhost). Make sure these will pass.',
+  ].join('\n');
+}
+
+/** Instructions for a Node single-page stack that lives in `scope` (stacks/<stack>/). */
+function nodeStackInstructions({ stack, allowedFiles, scope }) {
+  return [
+    '',
+    '## How to work (mogra, Claude Code)',
+    `- Stack: ${stack}. You are in its folder (${scope}); it is an existing app: change what the issue asks and keep every existing feature and passing test.`,
+    '- Edit files here directly. Run `npm install`, `npm test` and `npm run build` yourself and iterate until they pass. Do not commit, push or switch branches; mogra does that.',
+    `- Only files under ${scope} may change; anything outside it is reverted.`,
+    ...(allowedFiles ? [`- Only change these paths (anything else is reverted): ${allowedFiles.join(', ')}.`] : []),
+    '- Keep package.json scripts (typecheck, lint, test, build, test:e2e) and vite base `process.env.VITE_BASE_PATH`. Do not add dependencies unless the issue needs them.',
+    '- No `innerHTML` / `v-html` / `{@html}` / `bypassSecurityTrust*` / `eval`. Never hard-code password-like strings.',
+    '- Update unit tests (src/**/*.test.*) and e2e/todomvc.spec.ts when behaviour or accessible names change. Query by role and accessible name, not CSS classes.',
+    '- After you finish, mogra independently runs: npm install, typecheck, lint, unit tests, Playwright e2e (320/768/1280px reflow + axe-core), build, `npm audit --omit=dev --audit-level=high`, and a Gitleaks secret scan. Make sure these will pass.',
   ].join('\n');
 }
 

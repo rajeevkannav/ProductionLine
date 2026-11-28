@@ -6,8 +6,10 @@
  *   node src/local-runner.mjs build --repo owner/name --issue 17 [--model sonnet] [--keep]
  *   node src/local-runner.mjs next  --repo owner/name            # build the issue marked mogra:next
  *
+ * Supports rails8-pg-hotwire incremental features and the TodoMVC+ Node stacks (stacks/<stack>/).
+ *
  * Needs: `gh` (signed in), the `claude` CLI signed in to your subscription (or MOGRA_CLAUDE_BIN),
- * Ruby + Bundler, Node, and PostgreSQL binaries (initdb/pg_ctl). Nothing on this machine listens
+ * and Node; Rails builds also need Ruby + Bundler and PostgreSQL binaries (initdb/pg_ctl). Nothing on this machine listens
  * to GitHub: you start each build, and only issues opened by the repository owner are built.
  */
 import { execFileSync, execSync } from 'node:child_process';
@@ -16,6 +18,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.mjs';
+import { SUPPORTED_STACKS } from './conventions.mjs';
 import { resolveAgentPlan } from './harness-runner.mjs';
 import { buildIssueUpdate } from './issue-router.mjs';
 
@@ -29,6 +32,13 @@ const log = (msg) => console.log(`[mogra-local] ${msg}`);
 /** Conventional-commit title used by the cloud build too. */
 export function changeTitle(issueTitle, issueNumber, stack) {
   return /^[a-z]+(\([^)]+\))?!?: /.test(issueTitle) ? `${issueTitle} (#${issueNumber})` : `feat(${stack}): ${issueTitle} (#${issueNumber})`;
+}
+
+/** Which stacks a local build can take: Rails incremental features, or any Node stack. */
+export function localBuildKind(stack, deliveryMode) {
+  if (stack === 'rails8-pg-hotwire' && deliveryMode === 'incremental-feature') return 'rails';
+  if (SUPPORTED_STACKS[stack]?.runtime === 'node') return 'node';
+  return null;
 }
 
 /** Same composition as scripts/run-agent.sh: task header, issue, skills, rules. */
@@ -113,8 +123,9 @@ export async function build({ repo, issue, model, keep = false }) {
   const config = loadConfig({ controlPlaneDir: CONTROL_PLANE, spokeDir: clone });
   const routed = buildIssueUpdate({ title: data.title, body: data.body ?? '', labels, config });
   const stack = routed.stack;
-  if (stack !== 'rails8-pg-hotwire' || routed.deliveryMode !== 'incremental-feature') {
-    throw new Error(`Local builds support rails8-pg-hotwire incremental features (got ${stack} / ${routed.deliveryMode}).`);
+  const kind = localBuildKind(stack, routed.deliveryMode);
+  if (!kind) {
+    throw new Error(`Local builds support rails8-pg-hotwire incremental features and Node stacks (got ${stack} / ${routed.deliveryMode}).`);
   }
   const plan = resolveAgentPlan({ config, controlPlaneDir: CONTROL_PLANE, stackOverride: stack });
   const effectiveModel = model ?? (plan.harness === 'claude-code' ? plan.model : 'sonnet');
@@ -149,24 +160,29 @@ export async function build({ repo, issue, model, keep = false }) {
   const promptFile = join(worktree, '..', `mogra-prompt-${issue}.md`);
   writeFileSync(promptFile, composePrompt({ issueNumber: issue, stack, plan, issueTitle: data.title, issueBody: data.body ?? '' }));
 
-  const pg = startPostgres();
-  const shim = yarnShimDir();
+  const pg = kind === 'rails' ? startPostgres() : null;
+  const shim = kind === 'rails' ? yarnShimDir() : null;
   const env = {
     ...process.env,
-    DATABASE_URL: pg.url,
+    ...(pg ? { DATABASE_URL: pg.url } : {}),
     PATH: shim ? `${shim}:${process.env.PATH}` : process.env.PATH,
   };
   let ok = false;
   try {
-    if (!existsSync(join(worktree, 'config', 'application.rb'))) {
+    if (kind === 'node') {
+      // The builder installs, tests and builds inside stacks/<stack>/; Claude may only change that folder.
+      mkdirSync(join(worktree, 'stacks', stack), { recursive: true });
+    } else if (!existsSync(join(worktree, 'config', 'application.rb'))) {
       execSync(`bash ${JSON.stringify(join(CONTROL_PLANE, 'scripts', 'bootstrap-rails.sh'))} . ${JSON.stringify(repo.split('/')[1])} ${JSON.stringify(routed.deployTarget)}`, {
         cwd: worktree,
         env,
         stdio: 'inherit',
       });
     }
-    execSync('bundle config set --local deployment false && bundle install --quiet', { cwd: worktree, env, stdio: 'inherit' });
-    if (existsSync(join(worktree, 'package.json'))) execSync('yarn install --silent', { cwd: worktree, env, stdio: 'inherit' });
+    if (kind === 'rails') {
+      execSync('bundle config set --local deployment false && bundle install --quiet', { cwd: worktree, env, stdio: 'inherit' });
+      if (existsSync(join(worktree, 'package.json'))) execSync('yarn install --silent', { cwd: worktree, env, stdio: 'inherit' });
+    }
 
     execFileSync(
       process.execPath,
@@ -177,7 +193,10 @@ export async function build({ repo, issue, model, keep = false }) {
 
     // Squash mogra's checkpoints into one commit, like the cloud build.
     sh('git', ['-C', worktree, 'reset', '--soft', startCommit]);
-    for (const p of ['vendor/bundle', '.bundle', 'node_modules', 'public/assets', 'config/master.key']) rmSync(join(worktree, p), { recursive: true, force: true });
+    const buildOutput = kind === 'node'
+      ? ['node_modules', 'dist', 'playwright-report', 'test-results', 'sbom.cdx.json'].map((p) => join('stacks', stack, p))
+      : ['vendor/bundle', '.bundle', 'node_modules', 'public/assets', 'config/master.key'];
+    for (const p of buildOutput) rmSync(join(worktree, p), { recursive: true, force: true });
     sh('git', ['-C', worktree, 'add', '-A']);
     const title = changeTitle(data.title, issue, stack);
     sh('git', ['-C', worktree, 'commit', '-q', '-m', `${title}\n\nBuilt locally by ProductionLine (mogra) with Claude Code (${effectiveModel}).`]);
@@ -198,7 +217,7 @@ export async function build({ repo, issue, model, keep = false }) {
     log(`PR #${pr} pushed and labelled ${BUILT_LABEL}: GitHub now verifies, merges, deploys and marks the next issue.`);
     return { pr: Number(pr), branch };
   } finally {
-    pg.stop();
+    pg?.stop();
     if (shim) rmSync(shim, { recursive: true, force: true });
     if (ok && !keep) {
       try {

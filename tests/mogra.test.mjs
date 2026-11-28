@@ -577,3 +577,35 @@ test('local build mode: config, chain, workflow and Claude guards', async () => 
   assert.equal(changeTitle('feat(security): add sudo mode', 17, 'rails8-pg-hotwire'), 'feat(security): add sudo mode (#17)');
   assert.equal(changeTitle('Add sudo mode', 17, 'rails8-pg-hotwire'), 'feat(rails8-pg-hotwire): Add sudo mode (#17)');
 });
+
+test('local build mode: TodoMVC+ Node stacks stay inside stacks/<stack>/ and run the verify checks', async () => {
+  const { localBuildKind } = await import('../src/local-runner.mjs');
+  assert.equal(localBuildKind('rails8-pg-hotwire', 'incremental-feature'), 'rails');
+  assert.equal(localBuildKind('rails8-pg-hotwire', 'greenfield-stack'), null);
+  for (const stack of ['react19-ts-vite', 'vue3-ts-vite', 'svelte5-ts-vite', 'angular-ts', 'solid-ts-vite']) {
+    assert.equal(localBuildKind(stack, 'greenfield-stack'), 'node');
+  }
+  assert.equal(localBuildKind('android-hotwire-native', 'incremental-feature'), null);
+
+  const { stackScope, nodeCheckCommands } = await import('../src/incremental-builder.mjs');
+  assert.equal(stackScope('vue3-ts-vite'), 'stacks/vue3-ts-vite/');
+  assert.equal(stackScope('rails8-pg-hotwire'), '');
+  const pkg = { scripts: { typecheck: 'tsc', test: 'vitest run', 'test:e2e': 'playwright test', build: 'vite build' } };
+  const cmds = nodeCheckCommands(pkg, {});
+  for (const cmd of ['npm run typecheck', 'npm test', 'npm run test:e2e', 'npm run build', 'npm audit --omit=dev --audit-level=high']) assert.ok(cmds.includes(cmd), cmd);
+  assert.ok(!cmds.includes('npm run lint'), 'missing scripts are skipped');
+  assert.ok(cmds.indexOf('npm run test:e2e') < cmds.indexOf('npm run build'));
+  assert.ok(!nodeCheckCommands(pkg, { MOGRA_SKIP_E2E: '1' }).includes('npm run test:e2e'));
+  assert.ok(cmds.some((c) => c.includes('gitleaks detect')));
+
+  const { isAllowedChange, claudeInstructions } = await import('../src/claude-provider.mjs');
+  const scoped = { scope: 'stacks/vue3-ts-vite/' };
+  assert.equal(isAllowedChange('stacks/vue3-ts-vite/src/App.vue', scoped), true);
+  assert.equal(isAllowedChange('stacks/vue3-ts-vite/package-lock.json', scoped), true);
+  assert.equal(isAllowedChange('stacks/react19-ts-vite/src/App.tsx', scoped), false);
+  assert.equal(isAllowedChange('README.md', scoped), false);
+  assert.equal(isAllowedChange('.github/workflows/mogra.yml', scoped), false);
+  const text = claudeInstructions({ stack: 'vue3-ts-vite', scope: 'stacks/vue3-ts-vite/' });
+  assert.match(text, /npm test/);
+  assert.doesNotMatch(text, /Minitest|bin\/rails/);
+});
