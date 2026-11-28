@@ -9,6 +9,120 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, wr
 import { dirname, join, relative, resolve } from 'node:path';
 
 const FORBIDDEN_PREFIXES = ['.github/', '.git/', 'node_modules/', 'dist/'];
+
+/**
+ * Cross-stack UI contract: every TodoMVC+ stack renders the same DOM skeleton (class names)
+ * and styles it from one global `src/styles.css` built on the same QuantumBlack light tokens,
+ * so all five deployed apps look and behave alike regardless of framework.
+ */
+export const CROSS_STACK_UI = Object.freeze({
+  stylesheet: 'src/styles.css',
+  requiredClasses: Object.freeze([
+    'todoapp', 'app-header', 'app-title', 'app-stack', 'app-toolbar',
+    'new-todo-form', 'new-todo', 'todo-main', 'toggle-all', 'todo-list', 'todo-item',
+    'todo-toggle', 'todo-title', 'todo-edit', 'todo-destroy',
+    'app-footer', 'todo-count', 'todo-filters', 'clear-completed',
+  ]),
+  lightTokens: Object.freeze({
+    '--qb-canvas': '#f8fafc',
+    '--qb-surface': '#ffffff',
+    '--qb-elevated': '#f1f5f9',
+    '--qb-border': 'rgba(15, 23, 42, 0.12)',
+    '--qb-border-strong': 'rgba(15, 23, 42, 0.22)',
+    '--qb-text': '#0f172a',
+    '--qb-text-secondary': '#334155',
+    '--qb-text-muted': '#475569',
+    '--qb-accent': '#0f766e',
+    '--qb-accent-hover': '#115e59',
+    '--qb-on-accent': '#ffffff',
+    '--qb-focus': '#0369a1',
+    '--qb-danger': '#be123c',
+    '--qb-danger-bg': '#ffe4e6',
+    '--qb-radius': '14px',
+    '--qb-radius-sm': '8px',
+    '--qb-content-width': '40rem',
+    '--qb-font-sans': "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    '--qb-font-mono': "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  }),
+  darkTokens: Object.freeze({
+    '--qb-canvas': '#020617',
+    '--qb-surface': '#0f172a',
+    '--qb-elevated': '#1e293b',
+    '--qb-border': 'rgba(148, 163, 184, 0.18)',
+    '--qb-border-strong': 'rgba(148, 163, 184, 0.32)',
+    '--qb-text': '#f1f5f9',
+    '--qb-text-secondary': '#cbd5e1',
+    '--qb-text-muted': '#94a3b8',
+    '--qb-accent': '#2dd4bf',
+    '--qb-accent-hover': '#5eead4',
+    '--qb-on-accent': '#042f2e',
+    '--qb-focus': '#38bdf8',
+    '--qb-danger': '#fb7185',
+    '--qb-danger-bg': 'rgba(244, 63, 94, 0.15)',
+  }),
+});
+
+const CROSS_STACK_SKELETON = `<main class="todoapp" aria-labelledby="app-title">
+  <header class="app-header">
+    <h1 id="app-title" class="app-title">TodoMVC+</h1>
+    <p class="app-stack">{stack id from the issue, e.g. vue3-ts-vite}</p>
+    <div class="app-toolbar" role="toolbar" aria-label="App actions">
+      <button type="button" class="btn">Undo</button> <button type="button" class="btn">Redo</button>
+      <button type="button" class="btn">Export</button>
+      <button type="button" class="btn">Import</button> <input type="file" accept="application/json" hidden>
+      <button type="button" class="btn" aria-pressed="false">Dark theme</button>
+    </div>
+  </header>
+  <form class="new-todo-form">
+    <label for="new-todo" class="sr-only">New todo</label>
+    <input id="new-todo" class="new-todo" placeholder="What needs to be done?" autocomplete="off">
+    <button type="submit" class="btn btn-primary">Add</button>
+  </form>
+  <section class="todo-main" aria-label="Todos">  <!-- render only when there is at least one todo -->
+    <input id="toggle-all" class="toggle-all" type="checkbox"> <label for="toggle-all">Mark all as complete</label>
+    <ul class="todo-list">
+      <li class="todo-item">  <!-- add "completed" / "editing" modifier classes on the li -->
+        <input type="checkbox" class="todo-toggle" aria-label="Toggle {title}">
+        <span class="todo-title">{title}</span>  <!-- double-click (and Enter on the focused title) starts editing -->
+        <input class="todo-edit" aria-label="Edit {title}">  <!-- rendered only while editing -->
+        <button type="button" class="todo-destroy" aria-label="Delete {title}">×</button>
+      </li>
+    </ul>
+  </section>
+  <footer class="app-footer">  <!-- render only when there is at least one todo -->
+    <span class="todo-count"><strong>{n}</strong> {item|items} left</span>
+    <nav class="todo-filters" aria-label="Filter todos">
+      <button type="button" class="filter" aria-pressed="true">All</button>
+      <button type="button" class="filter" aria-pressed="false">Active</button>
+      <button type="button" class="filter" aria-pressed="false">Completed</button>
+    </nav>
+    <button type="button" class="btn clear-completed">Clear completed</button>
+  </footer>
+  <div class="sr-only" role="status" aria-live="polite"></div>
+</main>`;
+
+function formatTokenBlock(selector, tokens) {
+  const lines = Object.entries(tokens).map(([name, value]) => `  ${name}: ${value};`);
+  return `${selector} {\n${lines.join('\n')}\n}`;
+}
+
+function crossStackUiPromptSection() {
+  return [
+    '## Cross-stack UI Consistency (MANDATORY — identical look across react19, vue3, svelte5, angular and solid)',
+    'Every TodoMVC+ stack MUST render the SAME DOM skeleton with the SAME class names and the SAME visual design. Translate the markup below into this framework\'s template syntax (className / class / :class / class: / [class.x] / classList are all fine) without renaming, dropping, or wrapping-and-restyling any class:',
+    '```html',
+    CROSS_STACK_SKELETON,
+    '```',
+    `Styling rules: put ALL app styling in ONE global plain-CSS file \`${CROSS_STACK_UI.stylesheet}\` (import it from the entry file, e.g. \`import './styles.css'\` in src/main.ts(x); for angular-ts list it in angular.json \`styles\`). NO Tailwind (never add tailwindcss / @tailwindcss/* / postcss.config.*), NO CSS-in-JS, NO inline style attributes, and NO component-scoped styles (no <style> blocks in .vue/.svelte files, no \`styles\`/\`styleUrl(s)\` in Angular components).`,
+    `\`${CROSS_STACK_UI.stylesheet}\` MUST start with this exact QuantumBlack light token block (light Mist is the default first paint, \`color-scheme: light\`) and the dark override, and MUST style every element ONLY through these var(--qb-*) tokens:`,
+    '```css',
+    formatTokenBlock(':root', { 'color-scheme': 'light', ...CROSS_STACK_UI.lightTokens }),
+    formatTokenBlock(':root[data-theme="dark"]', { 'color-scheme': 'dark', ...CROSS_STACK_UI.darkTokens }),
+    '```',
+    'The theme toggle sets/removes `data-theme="dark"` on `document.documentElement` and persists the choice in localStorage; default is light. NEVER auto-switch with `@media (prefers-color-scheme: dark)`.',
+    'Shared visual spec: body uses var(--qb-canvas) with var(--qb-font-sans); `.todoapp` is a centered card (max-width: var(--qb-content-width); margin-inline: auto; background var(--qb-surface); 1px solid var(--qb-border); border-radius var(--qb-radius); padding 1.5rem, 1rem at <=480px); `.app-title` has a 0.375rem-wide var(--qb-accent) bar via ::before; `.app-stack` is a small var(--qb-font-mono) pill in var(--qb-text-secondary) on var(--qb-elevated); `.btn-primary` and active filters (`[aria-pressed="true"]`) are var(--qb-accent) with var(--qb-on-accent) text; other buttons and `.filter` are var(--qb-elevated) pills in var(--qb-text-secondary) with var(--qb-font-mono) 0.75rem text; `.todo-item` rows are var(--qb-canvas) with 1px var(--qb-border) and var(--qb-radius-sm); `.todo-item.completed .todo-title` is line-through in var(--qb-text-muted); `.todo-destroy:hover` uses var(--qb-danger) on var(--qb-danger-bg); `.todo-count` uses tabular-nums; all :focus-visible outlines are 2px solid var(--qb-focus) with 2px offset; `.app-toolbar`, `.new-todo-form`, `.app-footer` and `.todo-filters` use flex-wrap and `.todo-title` uses overflow-wrap: anywhere so nothing overflows at 320px; include a `.sr-only` utility.',
+  ].join('\n');
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Safely write generated files inside workdir, blocking path traversal and protected paths. */
@@ -146,7 +260,7 @@ export function writeRunMetrics(workdir, telemetry) {
   return metrics;
 }
 
-function collectStaticIssues(workdir) {
+export function collectStaticIssues(workdir) {
   const issues = [];
   const vitestCfgPath = existsSync(join(workdir, 'vitest.config.ts'))
     ? join(workdir, 'vitest.config.ts')
@@ -215,6 +329,115 @@ function collectStaticIssues(workdir) {
       : '';
   if (!/<main\b/i.test(combinedSrc) && !/<main\b/i.test(indexHtml)) {
     issues.push('Accessibility error (axe landmark-one-main): wrap the main app content in a semantic `<main>` landmark element.');
+  }
+  issues.push(...collectCrossStackUiIssues(workdir, srcFiles, combinedSrc));
+  issues.push(...collectCompletenessIssues(workdir, srcFiles));
+  return issues;
+}
+
+/**
+ * Anti-stub gate: keyword presence alone let placeholder apps through (Undo wired to alert(),
+ * no-op Export/Import, single smoke tests). Require evidence that each power feature is implemented
+ * and that unit/E2E suites exercise more than a render smoke test.
+ */
+function collectCompletenessIssues(workdir, srcFiles) {
+  const issues = [];
+  const read = (f) => readFileSync(join(workdir, f), 'utf8');
+  const appSrc = srcFiles.filter((f) => !/\.(test|spec)\./.test(f)).map(read).join('\n');
+  const unitSrc = srcFiles.filter((f) => /\.(test|spec)\./.test(f)).map(read).join('\n');
+  const e2eSrc = listProjectFiles(workdir).filter((f) => f.startsWith('e2e/') && /\.ts$/.test(f)).map(read).join('\n');
+
+  const features = [
+    [/\bindexedDB\b/, 'versioned IndexedDB persistence (`indexedDB.open(...)` with an `onupgradeneeded` object store) plus the localStorage mirror'],
+    [/\bBroadcastChannel\b/, 'feature-detected BroadcastChannel multi-tab sync'],
+    [/\b(?:ctrlKey|metaKey)\b/, 'keyboard Undo/Redo shortcuts (Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z via `event.ctrlKey || event.metaKey`)'],
+    [/['"`]z['"`]/i, 'keyboard Undo/Redo shortcuts matching the `z` key'],
+    [/['"`]Escape['"`]/, 'Escape cancels inline edit'],
+    [/\bnew Blob\b|\bcreateObjectURL\b/, 'JSON Export that downloads a file (`new Blob([...], { type: "application/json" })` + `URL.createObjectURL`)'],
+    [/\bFileReader\b|\.text\(\)/, 'JSON Import that reads the chosen file (`await file.text()` or FileReader) and validates it before replacing todos'],
+    [/data-theme/, 'theme toggle that sets/removes `data-theme="dark"` on `document.documentElement`'],
+  ];
+  const missing = features.filter(([re]) => !re.test(appSrc)).map(([, label]) => label);
+  if (missing.length > 0) {
+    issues.push(`Incomplete TodoMVC+ app (stub detected): implement these required power features in src/ (non-test code): ${[...new Set(missing)].map((m) => `\n  - ${m}`).join('')}`);
+  }
+  if (/\b(?:alert|confirm|prompt)\s*\(/.test(appSrc)) {
+    issues.push('Placeholder UI detected: remove `alert()`/`confirm()`/`prompt()` calls from src/ and implement the real behaviour (Undo/Redo history, Export/Import, theme toggle).');
+  }
+  if (/(?:onClick|onclick|on:click|@click|\(click\))\s*=\s*[{"']\s*\(\)\s*=>\s*\{\s*\}/.test(appSrc)) {
+    issues.push('Placeholder UI detected: a button has an empty `() => {}` click handler. Wire every toolbar button (Undo, Redo, Export, Import, theme toggle) to real behaviour.');
+  }
+
+  const unitCases = (unitSrc.match(/\b(?:it|test)\s*\(\s*['"`]/g) ?? []).length;
+  if (unitCases < 5) {
+    issues.push(`Unit tests too shallow (${unitCases} test case(s)): add at least 5 Vitest cases under src/ covering add/trim, toggle & toggle-all, inline edit/delete, filters + Clear Completed, Undo/Redo, and rejection of malformed / prototype-polluting JSON import.`);
+  }
+  const e2eCases = (e2eSrc.match(/\btest\s*\(\s*['"`]/g) ?? []).length;
+  if (e2eCases < 4 || !/page\.reload\s*\(/.test(e2eSrc)) {
+    issues.push(`E2E suite too shallow (${e2eCases} test(s)): e2e/todomvc.spec.ts needs at least 4 Playwright tests including CRUD (add, toggle, edit, delete), filters, reload persistence (\`await page.reload()\` after waiting for the item), Undo/Redo, axe zero violations, and the 320px reflow check.`);
+  }
+  return issues;
+}
+
+/** Structural checks for the Cross-stack UI Consistency contract (shared skeleton + shared QuantumBlack light tokens). */
+function collectCrossStackUiIssues(workdir, srcFiles, combinedSrc) {
+  const issues = [];
+  const ref = 'Follow the Cross-stack UI Consistency rules.';
+
+  const missingClasses = CROSS_STACK_UI.requiredClasses.filter(
+    (cls) => !new RegExp(`(?<![\\w-])${cls}(?![\\w-])`).test(combinedSrc),
+  );
+  if (missingClasses.length > 0) {
+    issues.push(`Cross-stack UI skeleton mismatch: the shared TodoMVC+ markup is missing class name(s) ${missingClasses.map((c) => `\`${c}\``).join(', ')}. Use the exact shared skeleton class names in src/. ${ref}`);
+  }
+
+  const cssPath = join(workdir, CROSS_STACK_UI.stylesheet);
+  if (!existsSync(cssPath)) {
+    issues.push(`Missing required global stylesheet \`${CROSS_STACK_UI.stylesheet}\` holding the shared QuantumBlack light tokens and all app styles. ${ref}`);
+  } else {
+    const css = readFileSync(cssPath, 'utf8');
+    const missingTokens = Object.keys(CROSS_STACK_UI.lightTokens).filter(
+      (token) => !new RegExp(`${token}\\s*:`).test(css),
+    );
+    if (missingTokens.length > 0) {
+      issues.push(`\`${CROSS_STACK_UI.stylesheet}\` is missing shared design token(s) ${missingTokens.join(', ')} in its :root block. Copy the exact token block. ${ref}`);
+    }
+    if (!/color-scheme\s*:\s*light/.test(css) || !/\[data-theme=["']?dark["']?\]/.test(css)) {
+      issues.push(`\`${CROSS_STACK_UI.stylesheet}\` MUST default to \`color-scheme: light\` in :root and define the dark theme only under \`:root[data-theme="dark"]\`. ${ref}`);
+    }
+    if (/prefers-color-scheme\s*:\s*dark/.test(css)) {
+      issues.push(`\`${CROSS_STACK_UI.stylesheet}\` MUST NOT auto-switch themes with \`@media (prefers-color-scheme: dark)\`; light is the shared default and dark is opt-in via \`data-theme="dark"\`. ${ref}`);
+    }
+    const angularJsonPath = join(workdir, 'angular.json');
+    const importedFromAngular = existsSync(angularJsonPath) && readFileSync(angularJsonPath, 'utf8').includes(CROSS_STACK_UI.stylesheet);
+    if (!importedFromAngular && !/['"]\.{1,2}\/(?:[\w-]+\/)*styles\.css['"]/.test(combinedSrc)) {
+      issues.push(`\`${CROSS_STACK_UI.stylesheet}\` is never loaded: import it from the entry file (e.g. \`import './styles.css';\` in src/main.ts) or list it in angular.json \`styles\`. ${ref}`);
+    }
+  }
+
+  const pkgPath = join(workdir, 'package.json');
+  if (existsSync(pkgPath)) {
+    let pkg = {};
+    try {
+      pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    } catch {
+      // Malformed package.json is reported by the npm install step.
+    }
+    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    const tailwind = Object.keys(deps).filter((name) => name === 'tailwindcss' || name.startsWith('@tailwindcss/'));
+    if (tailwind.length > 0) {
+      issues.push(`Cross-stack UI uses plain CSS only: remove ${tailwind.join(', ')} from package.json and style through \`${CROSS_STACK_UI.stylesheet}\`. ${ref}`);
+    }
+  }
+
+  for (const file of srcFiles) {
+    const content = readFileSync(join(workdir, file), 'utf8');
+    if (/\.(vue|svelte)$/.test(file) && /<style\b/i.test(content)) {
+      issues.push(`Component-scoped <style> block in ${file}: move these rules into \`${CROSS_STACK_UI.stylesheet}\` so every stack shares one stylesheet. ${ref}`);
+    }
+    if (/\.ts$/.test(file) && content.includes('@Component') && /\b(?:styles|styleUrls?)\s*:/.test(content)) {
+      issues.push(`Angular component styles in ${file}: remove \`styles\`/\`styleUrl(s)\` and put the rules in \`${CROSS_STACK_UI.stylesheet}\` so every stack shares one stylesheet. ${ref}`);
+    }
   }
   return issues;
 }
@@ -321,7 +544,9 @@ async function main() {
       'Build a COMPLETE, polished, production-quality application — NO minimal toy stubs. Include ALL requested features:',
       '1. Full TodoMVC CRUD: add todo (trimmed non-empty), toggle single & toggle-all, inline edit (Enter/Blur saves, Escape cancels, empty deletes), delete todo, Clear Completed, live remaining count, All/Active/Completed filters.',
       '2. TodoMVC+ Power Features: versioned IndexedDB persistence WITH synchronous localStorage write-through mirror on every save (and fast localStorage read fallback so immediate reloads never lose in-flight IndexedDB writes, and initial mount never overwrites persisted items with []; ALWAYS guard async `.then(...)` hydration with an unmount cleanup flag `let active = true; ... return () => { active = false; }` so state setters never run after jsdom teardown), BroadcastChannel multi-tab sync (feature-detected), Undo/Redo history (buttons + Ctrl+Z / Ctrl+Shift+Z), prototype-pollution-safe validated JSON Export/Import, and accessible Light/Dark theme toggle.',
-      '3. Accessibility, QuantumBlack Design System Aesthetic & Ultra-Modern CSS: OKLCH + light-dark() design tokens inspired by QuantumBlack (Inter + JetBrains Mono typography, dark obsidian slate-950/slate-900 default & high-contrast light Mist surface, 1px hairline borders, teal-400/sky-500 semantic accents, tabular-nums counters), @layer, @container responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast (NEVER use text-slate-400 or text-gray-400 on light surfaces — use slate-600/700 for >=4.5:1 ratio and dark:text-slate-300 in dark mode), visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
+      '3. Accessibility, QuantumBlack Design System Aesthetic & Ultra-Modern CSS: the shared QuantumBlack light-theme tokens defined in the Cross-stack UI Consistency section below (Inter + JetBrains Mono typography, light Mist default surface with an opt-in dark obsidian theme, 1px hairline borders, teal/sky semantic accents, tabular-nums counters), responsive layout with ZERO horizontal overflow at 320px width, >=4.5:1 contrast (secondary text uses var(--qb-text-secondary)/var(--qb-text-muted), NEVER slate-400/gray-400 equivalents on light surfaces), visible :focus-visible rings, aria-live polite announcements, logical focus restoration, prefers-reduced-motion, and forced-colors support. NEVER put aria-label on <label>, <div>, or <span> without an ARIA role (use <button aria-label="..."> or <span class="sr-only"> inside <label>).',
+      '',
+      crossStackUiPromptSection(),
       '',
       'REQUIRED files checklist:',
       '- package.json (scripts: dev, typecheck: "tsc --noEmit", lint: "tsc --noEmit", test: "vitest run", build: "tsc --noEmit && vite build", test:e2e: "playwright test")',
@@ -405,6 +630,9 @@ async function main() {
     }
     if (check.output.includes('Client-only API called on the server side')) {
       hints.push('CRITICAL SolidJS Vitest SSR error: SolidJS is resolving server bundle inside Vitest! In `vitest.config.ts`, MUST include `plugins: [solid()]` (from `vite-plugin-solid`), `resolve: { conditions: ["development", "browser"] }`, and `test: { environment: "jsdom", server: { deps: { inline: [/solid-js/] } }, exclude: ["e2e/**"] }`, or test a pure signal store in `src/store.test.ts` without DOM `render()`.');
+    }
+    if (check.output.includes('Cross-stack UI') || check.output.includes(CROSS_STACK_UI.stylesheet)) {
+      hints.push(`CRITICAL Cross-stack UI contract violation. Follow these rules exactly:\n${crossStackUiPromptSection()}`);
     }
     const repairPrompt = [
       `Fix or create any needed files (current files: [${existingFiles.join(', ')}]) to resolve ALL errors shown below:`,
