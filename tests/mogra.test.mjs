@@ -12,7 +12,7 @@ import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
 import { countMinitestRuns, mergeGemfile, missingTestChanges, parseGenerators, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
 import { generateShowcasePortal } from '../src/pages-portal.mjs';
-import { applyTheme, injectThemeLink, THEME_SOURCE } from '../src/pages-theme.mjs';
+import { applyTheme, followsUiContract, injectThemeLink, THEME_SOURCE } from '../src/pages-theme.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -248,6 +248,19 @@ test('pages theme links the shared stylesheet into every built stack once', () =
     const contract = applyTheme({ pagesDir: tmp, rootBase: '/', stacks: ['vue3-ts-vite'] });
     assert.deepEqual(contract.skipped, ['vue3-ts-vite']);
     assert.doesNotMatch(readFileSync(join(tmp, 'vue3-ts-vite', 'index.html'), 'utf8'), /data-mogra-theme/);
+    // Solid's compiled templates drop the quotes: class=todoapp. A prefixed class is not the contract.
+    for (const [name, js, expected] of [
+      ['solid', 'template(`<main class=todoapp aria-labelledby=app-title>`)', true],
+      ['svelte', '<main class="todoapp" aria-labelledby="app-title">', true],
+      ['react', 'jsx("main",{className:"todoapp"})', true],
+      ['prefixed', 'h("div",{class:"my-todoapp-shell"})', false],
+      ['suffixed', 'h("div",{class:"todoapp-legacy"})', false],
+    ]) {
+      const dist = join(tmp, `detect-${name}`);
+      mkdirSync(join(dist, 'assets'), { recursive: true });
+      writeFileSync(join(dist, 'assets', 'index.js'), js);
+      assert.equal(followsUiContract(dist), expected, name);
+    }
     assert.throws(() => injectThemeLink('<html><body></body></html>', '/x.css'), /no <\/head>/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });

@@ -21,6 +21,10 @@ export const THEME_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), 'th
 export const THEME_PATH = '_mogra/todomvc-theme.css';
 const MARKER = 'data-mogra-theme';
 
+// The contract's root class as a whole word, quoted or not: React/Vue emit "todoapp", Svelte
+// class="todoapp", Solid's compiled templates class=todoapp. Not todoapp-* or *-todoapp.
+const CONTRACT_CLASS = /(^|[^\w-])todoapp(?![\w-])/;
+
 /** True when a built stack renders the cross-stack UI contract (its markup carries the `todoapp` class). */
 export function followsUiContract(distDir) {
   const stack = [distDir];
@@ -29,7 +33,7 @@ export function followsUiContract(distDir) {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) stack.push(path);
-      else if (/\.(m?js|html)$/.test(entry.name) && /["'\s]todoapp["'\s]/.test(readFileSync(path, 'utf8'))) return true;
+      else if (/\.(m?js|html)$/.test(entry.name) && CONTRACT_CLASS.test(readFileSync(path, 'utf8'))) return true;
     }
   }
   return false;
