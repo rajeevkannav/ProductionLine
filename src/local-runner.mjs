@@ -173,7 +173,7 @@ export async function build({ repo, issue, model, keep = false }) {
       // The builder installs, tests and builds inside stacks/<stack>/; Claude may only change that folder.
       mkdirSync(join(worktree, 'stacks', stack), { recursive: true });
     } else if (!existsSync(join(worktree, 'config', 'application.rb'))) {
-      execSync(`bash ${JSON.stringify(join(CONTROL_PLANE, 'scripts', 'bootstrap-rails.sh'))} . ${JSON.stringify(repo.split('/')[1])} ${JSON.stringify(routed.deployTarget)}`, {
+      execFileSync('bash', [join(CONTROL_PLANE, 'scripts', 'bootstrap-rails.sh'), '.', repo.split('/')[1], routed.deployTarget], {
         cwd: worktree,
         env,
         stdio: 'inherit',

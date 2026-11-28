@@ -237,7 +237,7 @@ test('pages theme links the shared stylesheet into every built stack once', () =
     assert.match(href, /^\/TodoMVC-Plus\/_mogra\/todomvc-theme\.css\?v=[0-9a-f]{10}$/);
     assert.equal(readFileSync(join(tmp, '_mogra', 'todomvc-theme.css'), 'utf8'), readFileSync(THEME_SOURCE, 'utf8'));
     const html = readFileSync(join(tmp, 'angular-ts', 'index.html'), 'utf8');
-    assert.match(html, new RegExp(`<link rel="stylesheet" href="${href.replace(/[?.]/g, '\\$&')}" data-mogra-theme>\\n</head>`));
+    assert.ok(html.includes(`<link rel="stylesheet" href="${href}" data-mogra-theme>\n</head>`), html);
     applyTheme({ pagesDir: tmp, rootBase: '/TodoMVC-Plus/', stacks: ['angular-ts'] });
     assert.equal(readFileSync(join(tmp, 'angular-ts', 'index.html'), 'utf8').match(/data-mogra-theme/g).length, 1);
     assert.throws(() => applyTheme({ pagesDir: tmp, stacks: ['../etc'] }), /Invalid stack name/);
