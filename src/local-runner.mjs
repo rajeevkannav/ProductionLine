@@ -135,7 +135,16 @@ export async function build({ repo, issue, model, keep = false }) {
   const startCommit = sh('git', ['-C', worktree, 'rev-parse', 'HEAD']);
   log(`Building #${issue} "${data.title}" in ${worktree} (${startPoint}, Claude model ${effectiveModel})`);
 
-  sh('gh', ['issue', 'edit', String(issue), '-R', repo, '--add-label', `stack:${stack},mogra:active`, '--remove-label', NEXT_LABEL]);
+  for (const [name, color, description] of [
+    [NEXT_LABEL, 'fbca04', 'Next issue for a local mogra build (node src/local-runner.mjs next)'],
+    [BUILT_LABEL, '0e8a16', 'Built locally by mogra; GitHub verifies, merges and deploys'],
+    [`stack:${stack}`, '5319e7', ''],
+    ['mogra:active', '0075ca', ''],
+  ]) {
+    sh('gh', ['label', 'create', name, '-R', repo, '--color', color, ...(description ? ['--description', description] : []), '--force']);
+  }
+  sh('gh', ['issue', 'edit', String(issue), '-R', repo, '--add-label', `stack:${stack},mogra:active`]);
+  if (labels.includes(NEXT_LABEL)) sh('gh', ['issue', 'edit', String(issue), '-R', repo, '--remove-label', NEXT_LABEL]);
 
   const promptFile = join(worktree, '..', `mogra-prompt-${issue}.md`);
   writeFileSync(promptFile, composePrompt({ issueNumber: issue, stack, plan, issueTitle: data.title, issueBody: data.body ?? '' }));
@@ -174,7 +183,6 @@ export async function build({ repo, issue, model, keep = false }) {
     sh('git', ['-C', worktree, 'commit', '-q', '-m', `${title}\n\nBuilt locally by ProductionLine (mogra) with Claude Code (${effectiveModel}).`]);
     sh('git', ['-C', worktree, 'push', '-q', '--force-with-lease', '-u', 'origin', branch]);
 
-    sh('gh', ['label', 'create', BUILT_LABEL, '-R', repo, '--color', '0e8a16', '--description', 'Built locally by mogra; GitHub verifies, merges and deploys', '--force']);
     let pr = sh('gh', ['pr', 'list', '-R', repo, '--head', branch, '--json', 'number', '--jq', '.[0].number // empty']);
     if (!pr) {
       const url = sh('gh', ['pr', 'create', '-R', repo, '--base', 'main', '--head', branch, '--title', title, '--body', `Closes #${issue}\n\nBuilt locally by ProductionLine (\`mogra\`) with Claude Code (\`${effectiveModel}\`); GitHub runs the independent verification, merge and deploy.`]);
