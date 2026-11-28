@@ -783,7 +783,7 @@ jobs:
       - name: Deploy to GitHub Pages
         if: (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch') && hashFiles('pages-dist/index.html') != ''
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
       - name: Verify Render Blueprint & trigger optional Deploy Hook
         id: render_deploy
