@@ -219,6 +219,8 @@ function runStackChecks(workdir, stack) {
         240_000,
       );
       runCommand('bundle exec brakeman -q --no-pager', workdir, 120_000);
+      // Same secret scan as the verify job, when gitleaks is installed (catches hard-coded test passwords).
+      runCommand('if command -v gitleaks >/dev/null 2>&1; then gitleaks detect --source . --no-git --redact --no-banner --exit-code 1; fi', workdir, 120_000);
       runCommand('if bundle exec bundle-audit --help >/dev/null 2>&1; then bundle exec bundle-audit check --update; fi', workdir, 120_000);
     } else if (stack === 'android-hotwire-native') {
       if (existsSync(join(workdir, 'gradlew'))) {
@@ -450,6 +452,7 @@ async function main() {
     '- Never return lockfiles (Gemfile.lock, yarn.lock, package-lock.json), db/schema.rb, or db/migrate/*_create_solid_tables.rb; they are generated. Add new tables with new migrations.',
     '- Minitest 6 has no `stub` and no `minitest/mock`; fake collaborators with `define_singleton_method` (removed in `ensure`) or plain dependency injection.',
     '- Test behaviour (responses, redirects, records, emails, visible text), never markup details such as CSS class names or element counts; layout is checked separately by the UI review.',
+    '- Never hard-code password-like strings in tests (Gitleaks flags them as secrets): define one helper such as `def test_password = "x" * 16` or use `SecureRandom.alphanumeric(16)`.',
     '- The framework skeleton (Rails `rails new`, Gradle, Xcode) already exists: extend it, do not re-create or replace it, and never pin dependencies to older versions.',
     '- Implement the WHOLE issue in this response: every route must have its controller, action, and views; return complete files only.',
     '- Include comprehensive Minitest unit/integration tests for Rails features or unit tests for mobile clients.',

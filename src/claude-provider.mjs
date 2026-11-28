@@ -163,7 +163,8 @@ export function claudeInstructions({ stack, generators = [], locked = new Set(),
     '- Never change .github/, .mogra.yaml, .bundle/, db/migrate/*_create_solid_tables.rb, the `gem "rails"` line or config.load_defaults. Add gems by adding lines to the Gemfile (existing gems stay).',
     '- Minitest 6 has no `stub` / `minitest/mock`: use `define_singleton_method` (restored in `ensure`) or dependency injection.',
     '- Test behaviour (responses, redirects, records, emails, visible text), never CSS class names or element counts.',
-    '- After you finish, mogra independently runs: a fresh database built from migrations, `bin/rails test`, RuboCop, Brakeman, bundler-audit, a route check (every route has a controller), and a production smoke check (production config boots, CSS/JS served, no 5xx, no SMTP to localhost). Make sure these will pass.',
+    '- Never hard-code password-like strings in tests (the Gitleaks secret scan fails the PR): use one helper such as `def test_password = "x" * 16` or `SecureRandom.alphanumeric(16)`.',
+    '- After you finish, mogra independently runs: a fresh database built from migrations, `bin/rails test`, RuboCop, Brakeman, bundler-audit, a route check (every route has a controller), a Gitleaks secret scan, and a production smoke check (production config boots, CSS/JS served, no 5xx, no SMTP to localhost). Make sure these will pass.',
   ].join('\n');
 }
 
