@@ -188,7 +188,8 @@ function nodeStackInstructions({ stack, allowedFiles, scope }) {
     '- Keep package.json scripts (typecheck, lint, test, build, test:e2e) and vite base `process.env.VITE_BASE_PATH`. Do not add dependencies unless the issue needs them.',
     '- No `innerHTML` / `v-html` / `{@html}` / `bypassSecurityTrust*` / `eval`. Never hard-code password-like strings.',
     '- Update unit tests (src/**/*.test.*) and e2e/todomvc.spec.ts when behaviour or accessible names change. Query by role and accessible name, not CSS classes.',
-    '- After you finish, mogra independently runs: npm install, typecheck, lint, unit tests, Playwright e2e (320/768/1280px reflow + axe-core), build, `npm audit --omit=dev --audit-level=high`, and a Gitleaks secret scan. Make sure these will pass.',
+    '- The app must meet the TodoMVC+ cross-stack UI contract below (same DOM skeleton, class names and src/styles.css tokens as every other stack) and be complete: no placeholder handlers (alert(), empty onClick), real IndexedDB persistence, Undo/Redo, Export/Import and the theme toggle.',
+    '- After you finish, mogra independently runs: the TodoMVC+ static gate (contract classes and tokens, completeness), npm install, typecheck, lint, unit tests, Playwright e2e (320/768/1280px reflow + axe-core), build, `npm audit --omit=dev --audit-level=high`, and a Gitleaks secret scan. Make sure these will pass.',
   ].join('\n');
 }
 

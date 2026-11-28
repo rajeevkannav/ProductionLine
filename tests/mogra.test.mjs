@@ -241,6 +241,13 @@ test('pages theme links the shared stylesheet into every built stack once', () =
     applyTheme({ pagesDir: tmp, rootBase: '/TodoMVC-Plus/', stacks: ['angular-ts'] });
     assert.equal(readFileSync(join(tmp, 'angular-ts', 'index.html'), 'utf8').match(/data-mogra-theme/g).length, 1);
     assert.throws(() => applyTheme({ pagesDir: tmp, stacks: ['../etc'] }), /Invalid stack name/);
+    // A stack on the cross-stack UI contract keeps its own styles.css (and dark mode).
+    mkdirSync(join(tmp, 'vue3-ts-vite', 'assets'), { recursive: true });
+    writeFileSync(join(tmp, 'vue3-ts-vite', 'index.html'), '<html><head></head><body></body></html>');
+    writeFileSync(join(tmp, 'vue3-ts-vite', 'assets', 'index-abc.js'), 'h("main",{class:"todoapp","aria-labelledby":"app-title"})');
+    const contract = applyTheme({ pagesDir: tmp, rootBase: '/', stacks: ['vue3-ts-vite'] });
+    assert.deepEqual(contract.skipped, ['vue3-ts-vite']);
+    assert.doesNotMatch(readFileSync(join(tmp, 'vue3-ts-vite', 'index.html'), 'utf8'), /data-mogra-theme/);
     assert.throws(() => injectThemeLink('<html><body></body></html>', '/x.css'), /no <\/head>/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -607,7 +614,10 @@ test('local build mode: TodoMVC+ Node stacks stay inside stacks/<stack>/ and run
   assert.equal(isAllowedChange('.github/workflows/mogra.yml', scoped), false);
   const text = claudeInstructions({ stack: 'vue3-ts-vite', scope: 'stacks/vue3-ts-vite/' });
   assert.match(text, /npm test/);
+  assert.match(text, /cross-stack UI contract/);
   assert.doesNotMatch(text, /Minitest|bin\/rails/);
+  const { crossStackUiPromptSection } = await import('../src/free-tier-builder.mjs');
+  assert.match(crossStackUiPromptSection(), /class="todoapp"/);
 });
 
 function writeCompliantStack(dir) {
@@ -710,8 +720,8 @@ test('cross-stack UI contract: flags skeleton, token, theme, Tailwind, and scope
   }
 });
 
-test('cross-stack UI light tokens match the react19-ts-vite QuantumBlack light theme', () => {
-  const css = readFileSync(join(ROOT, 'src', 'themes', 'react19-qb-light.css'), 'utf8');
+test('cross-stack UI light tokens match the shared TodoMVC+ deploy theme', () => {
+  const css = readFileSync(THEME_SOURCE, 'utf8');
   const pairs = {
     '--qb-canvas': '--qb-canvas',
     '--qb-surface': '--qb-surface',

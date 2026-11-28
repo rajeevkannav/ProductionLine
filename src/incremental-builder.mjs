@@ -9,7 +9,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { callGeminiResilient, writeGeneratedFiles, writeRunMetrics } from './free-tier-builder.mjs';
+import { callGeminiResilient, collectStaticIssues, crossStackUiPromptSection, writeGeneratedFiles, writeRunMetrics } from './free-tier-builder.mjs';
 import { checkpoint, changedSince, claudeInstructions, enforceGuards, runClaude, writeClaudeMetrics } from './claude-provider.mjs';
 import { SUPPORTED_STACKS } from './conventions.mjs';
 
@@ -222,6 +222,9 @@ function runStackChecks(workdir, stack) {
     if (SUPPORTED_STACKS[stack]?.runtime === 'node') {
       const dir = join(workdir, stackScope(stack));
       if (!existsSync(join(dir, 'package.json'))) return { ok: false, output: `Missing ${stackScope(stack)}package.json.` };
+      // The TodoMVC+ blueprint gate the cloud builder uses: cross-stack UI contract, no placeholder stubs.
+      const staticIssues = collectStaticIssues(dir);
+      if (staticIssues.length) return { ok: false, output: staticIssues.map((i) => `- ${i}`).join('\n') };
       const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
       for (const cmd of nodeCheckCommands(pkg)) runCommand(cmd, dir, 300_000);
     } else if (stack === 'rails8-pg-hotwire') {
@@ -548,7 +551,7 @@ async function mainClaude({ workdir, stack, model, promptText }) {
   const allowedFiles = parseAllowedFiles(promptText);
   const scope = stackScope(stack) || null;
   const rules = { locked, allowedFiles, matchesAllowed: allowedMatcher(allowedFiles), scope };
-  const instructions = claudeInstructions({ stack, generators, locked, allowedFiles, scope });
+  const instructions = `${claudeInstructions({ stack, generators, locked, allowedFiles, scope })}${scope ? `\n\n${crossStackUiPromptSection()}` : ''}`;
   // Claude works inside the stack's folder; mogra's checkpoints and guards cover the whole repo.
   const cwd = scope ? join(workdir, scope) : workdir;
   const metricsDir = cwd;

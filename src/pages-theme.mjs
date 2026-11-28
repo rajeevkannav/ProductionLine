@@ -7,16 +7,33 @@
  * Copies src/themes/todomvc-qb-light.css to <pages-dir>/_mogra/todomvc-theme.css and adds a
  * <link> to it at the end of each <pages-dir>/<stack>/index.html <head>. Stack source is never
  * modified, so a rebuilt stack picks the theme up again on the next deploy.
+ *
+ * Stacks that already follow the cross-stack UI contract (`main.todoapp`, own src/styles.css with
+ * light/dark tokens) are left alone: the shared theme is a fallback for stacks not yet on it.
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const THEME_SOURCE = resolve(dirname(fileURLToPath(import.meta.url)), 'themes', 'todomvc-qb-light.css');
 export const THEME_PATH = '_mogra/todomvc-theme.css';
 const MARKER = 'data-mogra-theme';
+
+/** True when a built stack renders the cross-stack UI contract (its markup carries the `todoapp` class). */
+export function followsUiContract(distDir) {
+  const stack = [distDir];
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(path);
+      else if (/\.(m?js|html)$/.test(entry.name) && /["'\s]todoapp["'\s]/.test(readFileSync(path, 'utf8'))) return true;
+    }
+  }
+  return false;
+}
 
 /** Returns html with the theme <link> placed just before </head> (once). */
 export function injectThemeLink(html, href) {
@@ -37,14 +54,19 @@ export function applyTheme({ pagesDir, rootBase = '/', stacks, themeSource = THE
   const base = rootBase.endsWith('/') ? rootBase : `${rootBase}/`;
   const href = `${base}${THEME_PATH}?v=${version}`;
   const themed = [];
+  const skipped = [];
   for (const stack of stacks) {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(stack)) throw new Error(`Invalid stack name: ${stack}`);
     const index = join(pagesDir, stack, 'index.html');
     if (!existsSync(index)) continue;
+    if (followsUiContract(join(pagesDir, stack))) {
+      skipped.push(stack);
+      continue;
+    }
     writeFileSync(index, injectThemeLink(readFileSync(index, 'utf8'), href));
     themed.push(stack);
   }
-  return { href, themed };
+  return { href, themed, skipped };
 }
 
 function parseArgs(argv) {
@@ -60,6 +82,7 @@ function parseArgs(argv) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
   const stacks = (args.stacks || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const { href, themed } = applyTheme({ pagesDir: args['pages-dir'] || 'pages-dist', rootBase: args['root-base'] || '/', stacks });
+  const { href, themed, skipped } = applyTheme({ pagesDir: args['pages-dir'] || 'pages-dist', rootBase: args['root-base'] || '/', stacks });
   console.log(`Linked ${href} into ${themed.length ? themed.join(', ') : 'no stacks'}`);
+  if (skipped.length) console.log(`Left ${skipped.join(', ')} on their own src/styles.css (cross-stack UI contract).`);
 }

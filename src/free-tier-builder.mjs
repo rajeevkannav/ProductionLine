@@ -106,7 +106,7 @@ function formatTokenBlock(selector, tokens) {
   return `${selector} {\n${lines.join('\n')}\n}`;
 }
 
-function crossStackUiPromptSection() {
+export function crossStackUiPromptSection() {
   return [
     '## Cross-stack UI Consistency (MANDATORY — identical look across react19, vue3, svelte5, angular and solid)',
     'Every TodoMVC+ stack MUST render the SAME DOM skeleton with the SAME class names and the SAME visual design. Translate the markup below into this framework\'s template syntax (className / class / :class / class: / [class.x] / classList are all fine) without renaming, dropping, or wrapping-and-restyling any class:',
