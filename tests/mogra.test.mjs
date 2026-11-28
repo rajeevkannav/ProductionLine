@@ -591,6 +591,29 @@ test('local build mode: config, chain, workflow and Claude guards', async () => 
   assert.equal(changeTitle('Add sudo mode', 17, 'rails8-pg-hotwire'), 'feat(rails8-pg-hotwire): Add sudo mode (#17)');
 });
 
+test('local secret scan skips tracked files deleted in the working tree', async (t) => {
+  const { GITLEAKS_SCAN } = await import('../src/incremental-builder.mjs');
+  const { execSync } = await import('node:child_process');
+  try {
+    execSync('command -v gitleaks', { stdio: 'ignore' });
+  } catch {
+    t.skip('gitleaks not installed');
+    return;
+  }
+  const repo = mkdtempSync(join(tmpdir(), 'mogra-scan-'));
+  try {
+    const sh = (cmd) => execSync(cmd, { cwd: repo, stdio: 'pipe', encoding: 'utf8' });
+    writeFileSync(join(repo, 'keep.txt'), 'hello\n');
+    writeFileSync(join(repo, 'style.css'), 'body {}\n');
+    sh('git init -q && git add . && git -c user.name=t -c user.email=t@t commit -qm init');
+    rmSync(join(repo, 'style.css')); // deleted but still in the index, as after a model removes a file
+    writeFileSync(join(repo, 'styles.css'), 'main {}\n');
+    sh(GITLEAKS_SCAN); // throws on a non-zero exit (rsync used to fail on style.css)
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test('local build lock: one build per issue, stale locks are taken over', async () => {
   const { acquireLock, lockPath } = await import('../src/local-runner.mjs');
   assert.match(lockPath('owner/repo', 26), /\.mogra\/locks\/owner__repo-26\.lock$/);
