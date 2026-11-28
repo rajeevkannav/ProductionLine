@@ -336,7 +336,9 @@ async function main() {
   const generators = stack === 'rails8-pg-hotwire' ? parseGenerators(promptText) : [];
   const generated = runGenerators(workdir, generators);
   generated.changed.forEach((p) => changed.add(p));
-  const locked = new Set(generated.created);
+  // Generated app code is read-only; generated tests stay editable so they can follow the issue's
+  // requirements (e.g. a stricter password rule), and they still have to pass against the locked code.
+  const locked = new Set(generated.created.filter((p) => !p.startsWith('test/')));
   const prepare = (files) => mergeGemfile(withoutLockedFiles(withoutLockfiles(files), locked), workdir);
   const ctx = buildRepoContext(workdir);
 
