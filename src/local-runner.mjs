@@ -109,7 +109,58 @@ function yarnShimDir() {
   }
 }
 
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+/**
+ * Take an exclusive lock file for one build. A second build of the same issue fails fast instead of
+ * resetting the shared worktree under the first one. A lock left by a process that no longer runs
+ * (crash, Ctrl+C) is taken over. Returns a function that releases the lock.
+ */
+export function acquireLock(path, what = 'this issue') {
+  mkdirSync(dirname(path), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(path, `${process.pid}\n`, { flag: 'wx' });
+      return () => {
+        try {
+          if (Number(readFileSync(path, 'utf8')) === process.pid) rmSync(path, { force: true });
+        } catch {
+          /* already gone */
+        }
+      };
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      const holder = Number(readFileSync(path, 'utf8'));
+      if (holder && holder !== process.pid && pidAlive(holder)) {
+        throw new Error(`${what} is already being built by process ${holder}; wait for it to finish (or stop it) before starting another build.`);
+      }
+      rmSync(path, { force: true }); // stale: its process is gone
+    }
+  }
+  throw new Error(`Could not take the build lock ${path}.`);
+}
+
+export function lockPath(repo, issue) {
+  return join(homedir(), '.mogra', 'locks', `${repo.replace('/', '__')}-${issue}.lock`);
+}
+
 export async function build({ repo, issue, model, keep = false }) {
+  const release = acquireLock(lockPath(repo, issue), `${repo}#${issue}`);
+  try {
+    return await buildLocked({ repo, issue, model, keep });
+  } finally {
+    release();
+  }
+}
+
+async function buildLocked({ repo, issue, model, keep }) {
   const owner = repo.split('/')[0];
   const data = JSON.parse(sh('gh', ['issue', 'view', String(issue), '-R', repo, '--json', 'title,body,labels,author,state']));
   if (data.state !== 'OPEN') throw new Error(`#${issue} is ${data.state.toLowerCase()}`);
@@ -118,6 +169,8 @@ export async function build({ repo, issue, model, keep = false }) {
   }
   const labels = (data.labels ?? []).map((l) => l.name);
   if (labels.includes('mogra:epic')) throw new Error(`#${issue} is a milestone epic; build its sub-issues instead.`);
+  // Claim the issue before the (slow) clone so a `next` started meanwhile moves on instead of picking it again.
+  if (labels.includes(NEXT_LABEL)) sh('gh', ['issue', 'edit', String(issue), '-R', repo, '--remove-label', NEXT_LABEL]);
 
   const clone = ensureClone(repo);
   const config = loadConfig({ controlPlaneDir: CONTROL_PLANE, spokeDir: clone });
@@ -143,6 +196,10 @@ export async function build({ repo, issue, model, keep = false }) {
   const remoteBranch = sh('git', ['-C', clone, 'ls-remote', '--heads', 'origin', branch]);
   const startPoint = remoteBranch ? `origin/${branch}` : 'origin/main';
   sh('git', ['-C', clone, 'worktree', 'add', '-B', branch, worktree, startPoint]);
+  if (remoteBranch) {
+    // An existing issue branch may predate config or control-plane changes on main: bring it up to date.
+    sh('git', ['-C', worktree, '-c', 'user.name=mogra', '-c', 'user.email=mogra@localhost', 'merge', '--no-edit', '-q', 'origin/main']);
+  }
   const startCommit = sh('git', ['-C', worktree, 'rev-parse', 'HEAD']);
   log(`Building #${issue} "${data.title}" in ${worktree} (${startPoint}, Claude model ${effectiveModel})`);
 
@@ -155,7 +212,6 @@ export async function build({ repo, issue, model, keep = false }) {
     sh('gh', ['label', 'create', name, '-R', repo, '--color', color, ...(description ? ['--description', description] : []), '--force']);
   }
   sh('gh', ['issue', 'edit', String(issue), '-R', repo, '--add-label', `stack:${stack},mogra:active`]);
-  if (labels.includes(NEXT_LABEL)) sh('gh', ['issue', 'edit', String(issue), '-R', repo, '--remove-label', NEXT_LABEL]);
 
   const promptFile = join(worktree, '..', `mogra-prompt-${issue}.md`);
   writeFileSync(promptFile, composePrompt({ issueNumber: issue, stack, plan, issueTitle: data.title, issueBody: data.body ?? '' }));
