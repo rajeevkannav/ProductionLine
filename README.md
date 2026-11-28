@@ -24,6 +24,7 @@
 - **Pluggable Models & Harnesses:** Run **Gemini CLI** (Free Tier `gemini-3.1-flash-lite` ready), **Google Antigravity SDK**, **Claude Code**, **OpenAI Codex**, **Goose**, **OpenHands**, or **Aider**—with per-agent model overrides ([`harnesses/README.md`](harnesses/README.md)).
 - **Accessibility & Modern Web Built In:** Enforces WCAG 2.2 AA+, `320px` / 400% zoom zero-overflow reflow, Container Queries, `:has()`, `OKLCH`, `light-dark()`, View Transitions, local-first IndexedDB + `BroadcastChannel`, and `@axe-core/playwright` gates ([`skills/README.md`](skills/README.md)).
 - **Security & Supply-Chain First:** Least-privilege `permissions: {}` per job, env-bound inputs (zero shell injection), protected CI boundaries, Gitleaks secret scanning, `npm audit`, CycloneDX SBOMs, CodeQL, and Dependabot.
+- **One Look Across Frameworks (v0.2.0):** All five TodoMVC+ stacks share one UI contract (same DOM skeleton, class names and QuantumBlack tokens), enforced by the builder's static gate; stacks not yet on it get a shared fallback theme at deploy.
 - **Beyond SPAs (v0.2.0):** Grow a full-stack **Rails 8 + PostgreSQL + Hotwire** app one issue at a time (`incremental-feature` mode) with Minitest, RuboCop, **Brakeman**, and `bundler-audit` gates, deploy it to **Railway + Neon** (no credit card) or **Render**, and build **Hotwire Native** Android (`.apk`) and iOS clients from the same repo.
 
 ---
@@ -61,7 +62,7 @@ node src/local-runner.mjs build --repo <owner>/<repo> --issue 17   # build one i
 node src/local-runner.mjs next  --repo <owner>/<repo>              # build the issue the chain marked mogra:next
 ```
 
-It builds `rails8-pg-hotwire` incremental features and the five TodoMVC+ Node stacks. The runner reads the issue (only issues opened by the repository owner), works in a separate worktree under `~/.mogra/`, runs the issue's Generators, lets Claude Code (`claude -p`, or `MOGRA_CLAUDE_BIN`) edit the app and run the tests, reverts anything outside mogra's rules (protected paths, generated app code, the issue's Files list, append-only Gemfile), runs the same checks as the cloud builder against a throwaway PostgreSQL (for a TodoMVC+ stack: Claude may change only `stacks/<stack>/`, and the checks are the `verify-node-spa` ones: typecheck, lint, unit and Playwright e2e tests, build, `npm audit`, Gitleaks), then pushes a single commit and opens a PR labelled `mogra:built`. That label starts the GitHub verify job (tests, scans, UI review); after merge and a verified deploy, the chain labels the next sub-issue `mogra:next` instead of starting a cloud build. No AI key is needed on GitHub in this mode. Set it in the spoke's `.mogra.yaml`:
+It builds `rails8-pg-hotwire` incremental features and the five TodoMVC+ Node stacks (which must pass the cross-stack UI contract gate). The runner reads the issue (only issues opened by the repository owner), works in a separate worktree under `~/.mogra/`, runs the issue's Generators, lets Claude Code (`claude -p`, or `MOGRA_CLAUDE_BIN`) edit the app and run the tests, reverts anything outside mogra's rules (protected paths, generated app code, the issue's Files list, append-only Gemfile), runs the same checks as the cloud builder against a throwaway PostgreSQL (for a TodoMVC+ stack: Claude may change only `stacks/<stack>/`, and the checks are the `verify-node-spa` ones: typecheck, lint, unit and Playwright e2e tests, build, `npm audit`, Gitleaks), then pushes a single commit and opens a PR labelled `mogra:built`. That label starts the GitHub verify job (tests, scans, UI review); after merge and a verified deploy, the chain labels the next sub-issue `mogra:next` instead of starting a cloud build. No AI key is needed on GitHub in this mode. Set it in the spoke's `.mogra.yaml`:
 
 ```yaml
 runtime:
@@ -71,6 +72,19 @@ runtime:
 ```
 
 and add `pull_request: { types: [labeled] }` to the spoke's workflow caller.
+
+### Pin a release
+
+Spoke workflow callers use `@main` by default. To stay on a tested release instead, pin the reusable workflow and the control-plane checkout to a tag:
+
+```yaml
+    uses: rajeevkannav/ProductionLine/.github/workflows/mogra-sdlc.yml@v0.2.0
+    with:
+      control_plane_repo: "rajeevkannav/ProductionLine"
+      control_plane_ref: "v0.2.0"
+```
+
+See [`CHANGELOG.md`](CHANGELOG.md) and [Releases](https://github.com/rajeevkannav/ProductionLine/releases) for what each version changes.
 
 ### Sub-issue chains
 
