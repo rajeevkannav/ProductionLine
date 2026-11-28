@@ -88,9 +88,9 @@ async function callGeminiOnce({ apiKey, model, prompt }) {
 }
 
 /** Call Gemini rotating across candidate models and backing off cleanly on 429/503/network timeouts. */
-export async function callGeminiResilient({ apiKey, models, prompt, phase = 'build', telemetry = [] }) {
+export async function callGeminiResilient({ apiKey, models, prompt, phase = 'build', telemetry = [], backoffs = [0, 15, 35] }) {
   let lastErr;
-  for (const backoffSec of [0, 15, 35]) {
+  for (const backoffSec of backoffs) {
     if (backoffSec > 0) {
       console.error(`[mogra-oneshot] cooling down ${backoffSec}s before next model pass...`);
       await sleep(backoffSec * 1000);
@@ -107,6 +107,9 @@ export async function callGeminiResilient({ apiKey, models, prompt, phase = 'bui
         if (err.status && err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
       }
     }
+  }
+  if (lastErr?.status === 429) {
+    lastErr.message = `Gemini free-tier quota exhausted for ${models.join(', ')} (HTTP 429 after ${backoffs.length} passes). Re-run after the quota resets (daily reset at midnight Pacific). ${lastErr.message}`;
   }
   throw lastErr;
 }

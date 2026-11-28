@@ -374,7 +374,13 @@ async function main() {
   const stack = args.stack ?? 'rails8-pg-hotwire';
   const primaryModel = args.model ?? 'gemini-3.1-flash-lite';
   const envCandidates = (process.env.MOGRA_CANDIDATES ?? '').split(/\s+/).filter(Boolean);
-  const models = [...new Set(['gemini-3-flash-preview', primaryModel, ...envCandidates.filter((m) => /flash/.test(m))])];
+  // Quality first: editing an existing app needs the stronger Flash models. Rotate across them
+  // (each has its own free quota) and wait out rate limits instead of falling back to Flash-Lite,
+  // which repeatedly broke working code. MOGRA_ALLOW_LITE=1 restores the Lite fallback.
+  const strongModels = [...envCandidates.filter((m) => /flash/.test(m) && !/lite/.test(m)), 'gemini-3-flash-preview'];
+  const liteModels = [primaryModel, ...envCandidates.filter((m) => /lite/.test(m))];
+  const models = [...new Set(process.env.MOGRA_ALLOW_LITE === '1' ? [...strongModels, ...liteModels] : strongModels)];
+  const backoffs = [0, 30, 60, 120];
   const promptText = readFileSync(args['prompt-file'], 'utf8');
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is required');
@@ -431,12 +437,13 @@ async function main() {
     '- To add a gem, add it to the Gemfile (Gemfile.lock is updated by bundle install). Never change the `gem "rails"` line, .bundle/, or config.load_defaults.',
     '- Never return lockfiles (Gemfile.lock, yarn.lock, package-lock.json), db/schema.rb, or db/migrate/*_create_solid_tables.rb; they are generated. Add new tables with new migrations.',
     '- Minitest 6 has no `stub` and no `minitest/mock`; fake collaborators with `define_singleton_method` (removed in `ensure`) or plain dependency injection.',
+    '- Test behaviour (responses, redirects, records, emails, visible text), never markup details such as CSS class names or element counts; layout is checked separately by the UI review.',
     '- The framework skeleton (Rails `rails new`, Gradle, Xcode) already exists: extend it, do not re-create or replace it, and never pin dependencies to older versions.',
     '- Implement the WHOLE issue in this response: every route must have its controller, action, and views; return complete files only.',
     '- Include comprehensive Minitest unit/integration tests for Rails features or unit tests for mobile clients.',
   ].join('\n');
 
-  const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt, phase: 'incremental-build', telemetry });
+  const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt, phase: 'incremental-build', telemetry, backoffs });
   const written = writeGeneratedFiles(workdir, prepare(first.files));
   written.forEach((p) => changed.add(p));
   deleteGeneratedFiles(workdir, allowedDeletes(first.deletes));
@@ -464,9 +471,10 @@ async function main() {
       'Implement the WHOLE issue: every route needs its controller action and views, and every acceptance criterion needs a test.',
       ...(allowedFiles ? [`Only these paths may be changed (anything else is ignored): ${allowedFiles.join(', ')}.`] : []),
       ...(locked.size ? [`Generated files are read-only (edits are ignored); fix the code and tests around them instead: ${[...locked].join(', ')}.`] : []),
+      'Test behaviour, not CSS classes or element counts. Fix only what the errors above require; keep everything else unchanged.',
       'Do not return lockfiles, db/schema.rb, or db/migrate/*_create_solid_tables.rb (generated). Minitest 6 has no `stub`/`minitest/mock`: use `define_singleton_method` or dependency injection.',
     ].join('\n');
-    const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt, phase: `repair-${round}`, telemetry });
+    const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt, phase: `repair-${round}`, telemetry, backoffs });
     const updated = writeGeneratedFiles(workdir, prepare(patched.files));
     updated.forEach((p) => changed.add(p));
     deleteGeneratedFiles(workdir, allowedDeletes(patched.deletes));
