@@ -111,7 +111,7 @@ async function main() {
   } else if (plan.paused) {
     await api.comment(
       plan.paused.number,
-      `ProductionLine (\`mogra\`): the chain reached this milestone after #${issue}, but it has no open sub-issues yet. Add sub-issues (labelled \`${QUEUED_LABEL}\`) and label the first one \`${RUN_LABEL}\` to continue.`,
+      `ProductionLine (\`mogra\`): the chain reached this milestone after #${issue}, but it has no open sub-issues yet. Add sub-issues (labelled \`${QUEUED_LABEL}\`) and label the first one \`${local ? NEXT_LABEL : RUN_LABEL}\` to continue${local ? ' (then run `node src/local-runner.mjs next`)' : ''}.`,
     );
     console.log(`[mogra] Chain paused at #${plan.paused.number}: no sub-issues yet.`);
   } else {
