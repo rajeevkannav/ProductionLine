@@ -19,3 +19,5 @@ description: Enforces Rails 8 authentication, multi-tenant Account/Current.accou
 5. **Testing & Static Analysis:**
    - Use **Minitest** (`test/models/`, `test/controllers/`, `test/integration/`, `test/system/`) with deterministic fixtures.
    - Keep `bundle exec rubocop` and `bundle exec brakeman -q --no-pager` passing with zero warnings.
+   - Rails 8 `rate_limit` counts requests in `Rails.cache`, and `config/environments/test.rb` uses `:null_store` by default, so limits never trigger in tests. To test rate limits, set `config.cache_store = :memory_store` in the test environment (or pass `store: ActiveSupport::Cache::MemoryStore.new` to `rate_limit`) and call `Rails.cache.clear` in `setup`.
+   - `rate_limit` requires `to:` and `within:`; over the limit it responds `429` by default unless `with:` is given.
