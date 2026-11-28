@@ -90,12 +90,15 @@ async function callGeminiOnce({ apiKey, model, prompt }) {
 /** Call Gemini rotating across candidate models and backing off cleanly on 429/503/network timeouts. */
 export async function callGeminiResilient({ apiKey, models, prompt, phase = 'build', telemetry = [], backoffs = [0, 15, 35] }) {
   let lastErr;
+  let rateLimited = null;
+  const unavailable = new Set(); // models this key cannot use (404): skip them on later passes
   for (const backoffSec of backoffs) {
     if (backoffSec > 0) {
       console.error(`[mogra-oneshot] cooling down ${backoffSec}s before next model pass...`);
       await sleep(backoffSec * 1000);
     }
     for (const model of models) {
+      if (unavailable.has(model)) continue;
       try {
         console.log(`[mogra-oneshot] calling model='${model}'...`);
         const result = await callGeminiOnce({ apiKey, model, prompt });
@@ -103,11 +106,14 @@ export async function callGeminiResilient({ apiKey, models, prompt, phase = 'bui
         return result.data;
       } catch (err) {
         lastErr = err;
+        if (err.status === 429) rateLimited = err;
+        if (err.status === 404) unavailable.add(model);
         console.error(`[mogra-oneshot] ${err.message}`);
         if (err.status && err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
       }
     }
   }
+  if (rateLimited) lastErr = rateLimited; // report the quota, not a model that doesn't exist
   if (lastErr?.status === 429) {
     lastErr.message = `Gemini free-tier quota exhausted for ${models.join(', ')} (HTTP 429 after ${backoffs.length} passes). Re-run after the quota resets (daily reset at midnight Pacific). ${lastErr.message}`;
   }
