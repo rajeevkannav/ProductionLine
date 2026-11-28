@@ -740,10 +740,21 @@ jobs:
           done
           case "$STATE" in
             success)
-              if [ -n "$RAILWAY_APP_URL" ] && curl -fsS --max-time 60 "${RAILWAY_APP_URL%/}${HEALTH_PATH}" >/dev/null 2>&1; then
-                echo "status=Deployed ${SHORT}; live and healthy at ${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
-              else
+              if [ -z "$RAILWAY_APP_URL" ]; then
                 echo "status=Deployed ${SHORT} on Railway (set RAILWAY_APP_URL to check ${HEALTH_PATH})" >> "$GITHUB_OUTPUT"
+              else
+                HEALTHY=""
+                # The new release may still be switching over or waking from sleep: retry for ~2 minutes.
+                for j in $(seq 1 8); do
+                  if curl -fsS --max-time 30 "${RAILWAY_APP_URL%/}${HEALTH_PATH}" >/dev/null 2>&1; then HEALTHY=1; break; fi
+                  sleep 15
+                done
+                if [ -n "$HEALTHY" ]; then
+                  echo "status=Deployed ${SHORT}; live and healthy at ${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
+                else
+                  echo "status=Deployed ${SHORT}, but ${HEALTH_PATH} did not return 200 within 2 minutes at ${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
+                  echo "::warning::${RAILWAY_APP_URL%/}${HEALTH_PATH} not healthy after deploy"
+                fi
               fi ;;
             failure|error)
               echo "status=Railway deploy of ${SHORT} FAILED; check the Railway deploy logs" >> "$GITHUB_OUTPUT"
