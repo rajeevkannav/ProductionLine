@@ -678,7 +678,9 @@ jobs:
       id-token: write
       deployments: read
     environment:
-      name: ${{ contains(fromJSON('["render","railway"]'), needs.intake.outputs.deploy_target) && needs.intake.outputs.deploy_target || 'github-pages' }}
+      # A pull_request run (locally built PR) deploys from refs/pull/N/merge, which the github-pages
+      # environment rejects: it runs without an environment and hands the Pages deploy to main.
+      name: ${{ contains(fromJSON('["render","railway"]'), needs.intake.outputs.deploy_target) && needs.intake.outputs.deploy_target || (github.event_name != 'pull_request' && 'github-pages' || '') }}
       url: ${{ steps.deployment.outputs.page_url || steps.render_deploy.outputs.app_url || steps.railway_deploy.outputs.app_url }}
     steps:
       - name: Auto-merge verified PR
@@ -688,6 +690,26 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.discover-spec-build.outputs.pr_number }}
         run: gh pr merge "$PR_NUMBER" -R "$REPO" --squash --delete-branch
+
+      - name: Deploy GitHub Pages from main (locally built PR)
+        # Pages may only deploy from main, so a repository_dispatch run on main rebuilds Pages,
+        # comments on the issue and advances the sub-issue chain.
+        if: github.event_name == 'pull_request' && needs.intake.outputs.deploy_target == 'github-pages'
+        env:
+          GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.intake.outputs.issue_number }}
+          STACK: ${{ needs.intake.outputs.stack }}
+          BUILD_MODE: ${{ needs.intake.outputs.build_mode }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::MOGRA_BOT_TOKEN is required to start the Pages deploy on main (events from github.token do not trigger workflows)." >&2
+            exit 1
+          fi
+          jq -n --arg issue "$ISSUE_NUMBER" --arg stack "$STACK" --arg mode "$BUILD_MODE" \
+            '{event_type: "mogra.trigger", client_payload: {issue_number: $issue, stack: $stack, build_mode: $mode}}' \
+            | gh api "repos/${REPO}/dispatches" --input -
+          echo "[mogra] Merged. The GitHub Pages deploy for #${ISSUE_NUMBER} continues in a repository_dispatch run on main."
 
       - uses: actions/checkout@v4
         with:
@@ -704,12 +726,12 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-node@v4
-        if: needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch'
+        if: github.event_name != 'pull_request' && (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch')
         with:
           node-version: "22"
 
       - name: Build all TodoMVC+ stacks for GitHub Pages
-        if: needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch'
+        if: github.event_name != 'pull_request' && (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch')
         env:
           REPO_NAME: ${{ github.event.repository.name }}
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
@@ -771,17 +793,17 @@ jobs:
             --out pages-dist/index.html
 
       - name: Upload Pages artifact
-        if: (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch') && hashFiles('pages-dist/index.html') != ''
+        if: (github.event_name != 'pull_request' && (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch')) && hashFiles('pages-dist/index.html') != ''
         uses: actions/upload-pages-artifact@v3
         with:
           path: pages-dist
 
       - name: Wait for artifact indexing
-        if: (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch') && hashFiles('pages-dist/index.html') != ''
+        if: (github.event_name != 'pull_request' && (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch')) && hashFiles('pages-dist/index.html') != ''
         run: sleep 5
 
       - name: Deploy to GitHub Pages
-        if: (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch') && hashFiles('pages-dist/index.html') != ''
+        if: (github.event_name != 'pull_request' && (needs.intake.outputs.deploy_target == 'github-pages' || github.event_name == 'repository_dispatch')) && hashFiles('pages-dist/index.html') != ''
         id: deployment
         uses: actions/deploy-pages@v4
 
@@ -865,15 +887,16 @@ jobs:
           esac
 
       - name: Comment deployment status on Issue
-        if: ${{ !cancelled() && needs.intake.outputs.issue_number != '' }}
+        # The repository_dispatch run that deploys a locally built PR's Pages gets the issue from its payload.
+        if: ${{ !cancelled() && (needs.intake.outputs.issue_number || github.event.client_payload.issue_number) != '' }}
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN || github.token }}
           REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ needs.intake.outputs.issue_number }}
+          ISSUE_NUMBER: ${{ needs.intake.outputs.issue_number || github.event.client_payload.issue_number }}
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
           HOSTED_STATUS: ${{ steps.render_deploy.outputs.status || steps.railway_deploy.outputs.status }}
-          DEPLOY_TARGET: ${{ needs.intake.outputs.deploy_target }}
-          STACK: ${{ needs.intake.outputs.stack }}
+          DEPLOY_TARGET: ${{ needs.intake.outputs.deploy_target || 'github-pages' }}
+          STACK: ${{ needs.intake.outputs.stack || github.event.client_payload.stack }}
         run: |
           if [ "$DEPLOY_TARGET" = "render" ] || [ "$DEPLOY_TARGET" = "railway" ]; then
             gh issue comment "$ISSUE_NUMBER" -R "$REPO" --body "ProductionLine (\`mogra\`) verified \`${STACK}\` and merged to \`main\`. ${DEPLOY_TARGET^} status: ${HOSTED_STATUS}"
@@ -886,13 +909,15 @@ jobs:
         # roadmap -> milestone -> issue tree, closing finished milestone epics on the way.
         # Needs MOGRA_BOT_TOKEN: label events made with github.token do not trigger workflows.
         # Only move on when the live app is verified healthy (Railway target) or the target has no live check.
+        # A locally built PR's Pages deploy runs later on main; that run moves the chain on.
         if: >-
-          success() && needs.intake.outputs.issue_number != '' &&
+          success() && (needs.intake.outputs.issue_number || github.event.client_payload.issue_number) != '' &&
+          !(github.event_name == 'pull_request' && needs.intake.outputs.deploy_target == 'github-pages') &&
           (needs.intake.outputs.deploy_target != 'railway' || steps.railway_deploy.outputs.healthy == 'true')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN }}
           REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ needs.intake.outputs.issue_number }}
-          BUILD_MODE: ${{ needs.intake.outputs.build_mode }}
+          ISSUE_NUMBER: ${{ needs.intake.outputs.issue_number || github.event.client_payload.issue_number }}
+          BUILD_MODE: ${{ needs.intake.outputs.build_mode || github.event.client_payload.build_mode || 'cloud' }}
         run: node .mogra-control-plane/src/sub-issue-chain.mjs --repo "$REPO" --issue "$ISSUE_NUMBER" --mode "$BUILD_MODE"

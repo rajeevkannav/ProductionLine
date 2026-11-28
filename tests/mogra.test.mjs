@@ -566,6 +566,12 @@ test('local build mode: config, chain, workflow and Claude guards', async () => 
   assert.match(workflow, /github\.event\.pull_request\.user\.login == github\.repository_owner/);
   assert.match(workflow, /needs\.intake\.outputs\.build_mode != 'local'/);
   assert.match(workflow, /--mode "\$BUILD_MODE"/);
+  // Locally built PRs cannot deploy Pages from refs/pull/N/merge: merge, then hand the deploy to main.
+  assert.match(workflow, /github\.event_name != 'pull_request' && 'github-pages' \|\| ''/);
+  assert.match(workflow, /event_type: "mogra\.trigger", client_payload: \{issue_number: \$issue/);
+  assert.match(workflow, /!\(github\.event_name == 'pull_request' && needs\.intake\.outputs\.deploy_target == 'github-pages'\)/);
+  assert.match(workflow, /ISSUE_NUMBER: \$\{\{ needs\.intake\.outputs\.issue_number \|\| github\.event\.client_payload\.issue_number \}\}/);
+  assert.equal((workflow.match(/github\.event_name != 'pull_request' && \(needs\.intake\.outputs\.deploy_target == 'github-pages'/g) ?? []).length, 5);
 
   const { isAllowedChange, appendOnlyGemfile } = await import('../src/claude-provider.mjs');
   const rules = { locked: new Set(['app/controllers/sessions_controller.rb']), allowedFiles: ['app/views/**'], matchesAllowed: (p) => p.startsWith('app/views/') };
