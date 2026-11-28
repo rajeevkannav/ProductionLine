@@ -198,9 +198,10 @@ function runCommand(cmd, cwd, timeout = 180_000) {
 // Same secret scan as the verify job, when gitleaks is installed (catches hard-coded test passwords).
 // Scan only what would be committed (tracked + untracked, not gitignored: no log/, tmp/,
 // node_modules/), verbosely so the model sees file and line of each finding.
-const GITLEAKS_SCAN =
+export const GITLEAKS_SCAN =
   'if command -v gitleaks >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then ' +
-  'scan=$(mktemp -d) && git ls-files -co --exclude-standard -z | rsync -a --from0 --files-from=- . "$scan"/ && ' +
+  // Skip tracked files deleted in the working tree (rsync fails on them; macOS openrsync has no --ignore-missing-args).
+  'scan=$(mktemp -d) && git ls-files -co --exclude-standard -z | perl -0 -ne \'chomp; print "$_\\0" if -e\' | rsync -a --from0 --files-from=- . "$scan"/ && ' +
   'gitleaks detect --source "$scan" --no-git --redact --no-banner --no-color -v --exit-code 1; status=$?; rm -rf "$scan"; exit $status; fi';
 
 /** The verify-node-spa job's checks, run in the stack folder (set MOGRA_SKIP_E2E=1 to leave Playwright to GitHub). */

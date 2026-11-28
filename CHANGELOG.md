@@ -5,6 +5,7 @@ All notable changes to **ProductionLine (`mogra`)** are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- The local secret scan no longer fails when a build deletes a tracked file (e.g. `src/style.css` → `src/styles.css`): deleted paths still listed by `git ls-files` are skipped before `rsync` copies the files to scan. This cost Vue's TodoMVC+ build a repair round.
 - Local builds take a per-issue lock (`~/.mogra/locks/<owner>__<repo>-<issue>.lock`), so a second `local-runner build|next` for the same issue fails fast instead of resetting the worktree under the first; locks left by a stopped process are taken over. `next` also claims its issue (removes `mogra:next`) before cloning, so a second `next` started meanwhile no longer picks the same issue.
 - Locally built PRs on a GitHub Pages spoke now deploy. A `pull_request` run deploys from `refs/pull/N/merge`, which the `github-pages` environment rejects, so the whole deploy job (merge included) was refused. The PR run now merges without an environment and starts a `repository_dispatch` run on `main` (with the issue in its payload) that builds and deploys Pages, comments on the issue and advances the sub-issue chain.
 
