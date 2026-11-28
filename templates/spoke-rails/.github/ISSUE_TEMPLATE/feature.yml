@@ -46,6 +46,12 @@ body:
         bin/rails generate model Project name:string account:references
       render: text
   - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: "Optional. Paths or globs the model may change, one per line (e.g. test/**). Anything else it writes is ignored; use for small, focused fixes."
+      render: text
+  - type: textarea
     id: acceptance
     attributes:
       label: Acceptance Criteria

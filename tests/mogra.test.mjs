@@ -478,3 +478,22 @@ test('Rails production smoke check runs in the builder and the verify job', () =
   assert.match(readFileSync(join(ROOT, 'src/incremental-builder.mjs'), 'utf8'), /rails-production-smoke\.rb/);
   assert.match(readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8'), /RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 RAILS_LOG_LEVEL=fatal bundle exec rails runner \.\.\/control-plane\/scripts\/rails-production-smoke\.rb/);
 });
+
+test('issue Files section limits which paths the model may change', async () => {
+  const { parseAllowedFiles, withinAllowedFiles } = await import('../src/incremental-builder.mjs');
+  const globs = parseAllowedFiles('### Files\n\n```text\nconfig/environments/production.rb\napp/views/*/new.html.erb\ntest/**\n```\n\n## Skills');
+  assert.deepEqual(globs, ['config/environments/production.rb', 'app/views/*/new.html.erb', 'test/**']);
+  const kept = withinAllowedFiles(
+    {
+      'config/environments/production.rb': 'a',
+      'app/views/registrations/new.html.erb': 'b',
+      'app/views/registrations/edit.html.erb': 'c',
+      'app/controllers/concerns/authentication.rb': 'd',
+      'test/integration/sign_up_test.rb': 'e',
+    },
+    globs,
+  );
+  assert.deepEqual(Object.keys(kept).sort(), ['app/views/registrations/new.html.erb', 'config/environments/production.rb', 'test/integration/sign_up_test.rb']);
+  assert.equal(parseAllowedFiles('### Outcome\nno restriction'), null);
+  assert.deepEqual(Object.keys(withinAllowedFiles({ 'a.rb': 1 }, null)), ['a.rb']);
+});

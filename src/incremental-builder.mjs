@@ -244,6 +244,42 @@ const GENERATOR_ARG = /^[A-Za-z0-9_:!.\/=\-]+$/;
  * Parse the issue's `### Generators` section into allowlisted `rails generate` argument lists.
  * Lines look like `bin/rails generate authentication` or `- rails g model Project name:string`.
  */
+/** Glob (`*` within a segment, `**` across segments) to RegExp for repository-relative paths. */
+function globToRegExp(glob) {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  const pattern = escaped.replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '(?:.*/)?');
+  return new RegExp(`^${pattern.replace(/\(\?:\.\*\/\)\?$/, '.*')}$`);
+}
+
+/**
+ * Parse the issue's optional `### Files` section: repository paths or globs the model may change.
+ * Returns null when the section is absent (no restriction).
+ */
+export function parseAllowedFiles(spec = '') {
+  const match = String(spec).match(/^###\s*Files\s*\n([\s\S]*?)(?=^#{1,6}\s|(?![\s\S]))/m);
+  if (!match) return null;
+  const globs = match[1]
+    .split('\n')
+    .filter((raw) => !/^\s*(`{3}|~{3})/.test(raw))
+    .map((raw) => raw.replace(/`/g, '').replace(/^\s*[-*]\s*/, '').trim())
+    .filter((line) => line && !/^_?no response_?$/i.test(line));
+  return globs.length ? globs : null;
+}
+
+/** Keep only model writes inside the issue's allowed files (when the issue declares them). */
+export function withinAllowedFiles(filesMap = {}, globs = null) {
+  if (!globs) return filesMap;
+  const patterns = globs.map(globToRegExp);
+  return Object.fromEntries(
+    Object.entries(filesMap ?? {}).filter(([path]) => {
+      const normalized = path.replace(/^\/+/, '');
+      const keep = patterns.some((re) => re.test(normalized));
+      if (!keep) console.log(`[mogra-incremental] Ignored ${normalized}: not in the issue's Files list.`);
+      return keep;
+    }),
+  );
+}
+
 export function parseGenerators(spec = '') {
   const section = String(spec).match(/^###\s*Generators\s*\n([\s\S]*?)(?=^#{1,6}\s|(?![\s\S]))/m)?.[1] ?? '';
   const commands = [];
@@ -348,7 +384,11 @@ async function main() {
   // Generated app code is read-only; generated tests stay editable so they can follow the issue's
   // requirements (e.g. a stricter password rule), and they still have to pass against the locked code.
   const locked = new Set(generated.created.filter((p) => !p.startsWith('test/')));
-  const prepare = (files) => mergeGemfile(withoutLockedFiles(withoutLockfiles(files), locked), workdir);
+  const allowedFiles = parseAllowedFiles(promptText);
+  const prepare = (files) =>
+    mergeGemfile(withoutLockedFiles(withinAllowedFiles(withoutLockfiles(files), allowedFiles), locked), workdir);
+  const allowedDeletes = (deletes) =>
+    allowedFiles ? Object.keys(withinAllowedFiles(Object.fromEntries((deletes ?? []).map((d) => [d, ''])), allowedFiles)) : deletes;
   const ctx = buildRepoContext(workdir);
 
   const initialPrompt = [
@@ -362,6 +402,13 @@ async function main() {
       ? [
           '## Generators Already Run',
           `mogra already ran: ${generators.map((g) => `bin/rails generate ${g.join(' ')}`).join('; ')}. These generated files are known to work and are READ-ONLY (edits are ignored): ${[...locked].join(', ') || 'none'}. Build on them: add new files, and adjust only files that existed before. Your tests must match the generated behaviour.`,
+          '',
+        ]
+      : []),
+    ...(allowedFiles
+      ? [
+          '## Files You May Change',
+          `Only these paths may be created or changed (anything else is ignored): ${allowedFiles.join(', ')}. Everything else already works; do not touch it.`,
           '',
         ]
       : []),
@@ -389,7 +436,7 @@ async function main() {
   const first = await callGeminiResilient({ apiKey, models, prompt: initialPrompt, phase: 'incremental-build', telemetry });
   const written = writeGeneratedFiles(workdir, prepare(first.files));
   written.forEach((p) => changed.add(p));
-  deleteGeneratedFiles(workdir, first.deletes);
+  deleteGeneratedFiles(workdir, allowedDeletes(first.deletes));
   console.log(`[mogra-incremental] Applied ${written.length} files (${written.join(', ')}).`);
 
   const rounds = Math.max(1, Number(process.env.MOGRA_REPAIR_ROUNDS) || 6);
@@ -412,13 +459,14 @@ async function main() {
       '',
       'Return ONLY JSON: { "files": { "<relative-path>": "<full-file-content>" }, "deletes": [] }.',
       'Implement the WHOLE issue: every route needs its controller action and views, and every acceptance criterion needs a test.',
+      ...(allowedFiles ? [`Only these paths may be changed (anything else is ignored): ${allowedFiles.join(', ')}.`] : []),
       ...(locked.size ? [`Generated files are read-only (edits are ignored); fix the code and tests around them instead: ${[...locked].join(', ')}.`] : []),
       'Do not return lockfiles, db/schema.rb, or db/migrate/*_create_solid_tables.rb (generated). Minitest 6 has no `stub`/`minitest/mock`: use `define_singleton_method` or dependency injection.',
     ].join('\n');
     const patched = await callGeminiResilient({ apiKey, models, prompt: repairPrompt, phase: `repair-${round}`, telemetry });
     const updated = writeGeneratedFiles(workdir, prepare(patched.files));
     updated.forEach((p) => changed.add(p));
-    deleteGeneratedFiles(workdir, patched.deletes);
+    deleteGeneratedFiles(workdir, allowedDeletes(patched.deletes));
     console.log(`[mogra-incremental] Repair round ${round} updated: ${updated.join(', ')}`);
   }
 
