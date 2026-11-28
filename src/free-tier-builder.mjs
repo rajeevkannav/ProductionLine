@@ -5,7 +5,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
 const FORBIDDEN_PREFIXES = ['.github/', '.git/', 'node_modules/', 'dist/'];
@@ -106,7 +106,7 @@ function formatTokenBlock(selector, tokens) {
   return `${selector} {\n${lines.join('\n')}\n}`;
 }
 
-function crossStackUiPromptSection() {
+export function crossStackUiPromptSection() {
   return [
     '## Cross-stack UI Consistency (MANDATORY — identical look across react19, vue3, svelte5, angular and solid)',
     'Every TodoMVC+ stack MUST render the SAME DOM skeleton with the SAME class names and the SAME visual design. Translate the markup below into this framework\'s template syntax (className / class / :class / class: / [class.x] / classList are all fine) without renaming, dropping, or wrapping-and-restyling any class:',
@@ -142,6 +142,8 @@ export function writeGeneratedFiles(workdir, filesMap) {
     }
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, content, 'utf8');
+    // Scripts must stay executable (e.g. Render's buildCommand ./bin/render-build.sh).
+    if (normalized.startsWith('bin/') || normalized.endsWith('.sh') || content.startsWith('#!')) chmodSync(target, 0o755);
     written.push(normalized);
   }
   return written;
@@ -200,14 +202,17 @@ async function callGeminiOnce({ apiKey, model, prompt }) {
 }
 
 /** Call Gemini rotating across candidate models and backing off cleanly on 429/503/network timeouts. */
-async function callGeminiResilient({ apiKey, models, prompt, phase = 'build', telemetry = [] }) {
+export async function callGeminiResilient({ apiKey, models, prompt, phase = 'build', telemetry = [], backoffs = [0, 15, 35] }) {
   let lastErr;
-  for (const backoffSec of [0, 15, 35]) {
+  let rateLimited = null;
+  const unavailable = new Set(); // models this key cannot use (404): skip them on later passes
+  for (const backoffSec of backoffs) {
     if (backoffSec > 0) {
       console.error(`[mogra-oneshot] cooling down ${backoffSec}s before next model pass...`);
       await sleep(backoffSec * 1000);
     }
     for (const model of models) {
+      if (unavailable.has(model)) continue;
       try {
         console.log(`[mogra-oneshot] calling model='${model}'...`);
         const result = await callGeminiOnce({ apiKey, model, prompt });
@@ -215,10 +220,16 @@ async function callGeminiResilient({ apiKey, models, prompt, phase = 'build', te
         return result.data;
       } catch (err) {
         lastErr = err;
+        if (err.status === 429) rateLimited = err;
+        if (err.status === 404) unavailable.add(model);
         console.error(`[mogra-oneshot] ${err.message}`);
         if (err.status && err.status !== 429 && err.status !== 503 && err.status !== 404) throw err;
       }
     }
+  }
+  if (rateLimited) lastErr = rateLimited; // report the quota, not a model that doesn't exist
+  if (lastErr?.status === 429) {
+    lastErr.message = `Gemini free-tier quota exhausted for ${models.join(', ')} (HTTP 429 after ${backoffs.length} passes). Re-run after the quota resets (daily reset at midnight Pacific). ${lastErr.message}`;
   }
   throw lastErr;
 }

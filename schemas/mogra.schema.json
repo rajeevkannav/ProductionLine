@@ -35,6 +35,7 @@
           "type": "string",
           "enum": ["antigravity", "gemini-cli", "claude-code", "codex", "goose", "openhands", "aider"]
         },
+        "build": { "type": "string", "enum": ["cloud", "local"] },
         "model": { "type": "string" },
         "sandbox": { "type": "string", "enum": ["worktree", "docker", "github-runner"] }
       }
@@ -56,18 +57,57 @@
       "type": "object",
       "properties": {
         "blueprint": { "type": "string" },
+        "mode": {
+          "type": "string",
+          "enum": ["greenfield-stack", "incremental-feature"]
+        },
         "stack": {
           "type": "string",
-          "enum": ["react19-ts-vite", "vue3-ts-vite", "svelte5-ts-vite", "angular-ts", "solid-ts-vite"]
+          "enum": [
+            "react19-ts-vite",
+            "vue3-ts-vite",
+            "svelte5-ts-vite",
+            "angular-ts",
+            "solid-ts-vite",
+            "rails8-pg-hotwire",
+            "android-hotwire-native",
+            "ios-hotwire-native"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },
     "deployment": {
       "type": "object",
       "properties": {
-        "target": { "type": "string", "enum": ["github-pages", "none"] },
-        "custom_domain": { "type": "string" }
+        "target": {
+          "type": "string",
+          "enum": ["github-pages", "render", "railway", "mobile-release", "none"]
+        },
+        "custom_domain": { "type": "string" },
+        "render": {
+          "type": "object",
+          "properties": {
+            "region": { "type": "string" },
+            "health_path": { "type": "string" },
+            "service_name": { "type": "string" }
+          }
+        },
+        "railway": {
+          "type": "object",
+          "properties": {
+            "health_path": { "type": "string" },
+            "service_name": { "type": "string" }
+          }
+        }
       }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
     }
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "productionline-mogra",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -23,8 +23,10 @@
   ],
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "build:local": "node src/local-runner.mjs build",
+    "build:next": "node src/local-runner.mjs next",
     "validate": "node src/cli.mjs validate",
-    "check": "npm run validate && npm test && bash -n scripts/run-agent.sh"
+    "check": "npm run validate && npm test && bash -n scripts/run-agent.sh && bash -n scripts/bootstrap-rails.sh && ruby -c scripts/rails-single-db.rb >/dev/null && ruby -c scripts/rails-route-check.rb >/dev/null && ruby -c scripts/rails-production-smoke.rb >/dev/null && node --check scripts/ui-review.mjs"
   },
   "engines": {
     "node": ">=22.0.0"

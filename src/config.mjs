@@ -1,13 +1,19 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONVENTIONS, HARNESSES, SUPPORTED_STACKS } from './conventions.mjs';
+import {
+  CONVENTIONS,
+  HARNESSES,
+  SUPPORTED_DELIVERY_MODES,
+  SUPPORTED_DEPLOY_TARGETS,
+  SUPPORTED_STACKS,
+} from './conventions.mjs';
 import { parseYaml } from './yaml-lite.mjs';
 
 /** Deep-merge plain objects without mutating inputs. */
 export function mergeConfig(base, override) {
   const out = { ...base };
   for (const [k, v] of Object.entries(override ?? {})) {
-    if (v && typeof v === 'object' && !Array.isArray(v) && base?.[k] && typeof base[k] === 'object') {
+    if (v && typeof v === 'object' && !Array.isArray(v) && base?.[k] && typeof base[k] === 'object' && !Array.isArray(base[k])) {
       out[k] = mergeConfig(base[k], v);
     } else if (v !== undefined) {
       out[k] = v;
@@ -28,8 +34,17 @@ export function validateConfig(cfg) {
   if (!HARNESSES[cfg.runtime?.harness]) {
     errors.push(`Unknown runtime.harness: ${cfg.runtime?.harness}`);
   }
+  if (cfg.runtime?.build && !['cloud', 'local'].includes(cfg.runtime.build)) {
+    errors.push(`Unsupported runtime.build: ${cfg.runtime.build} (cloud | local)`);
+  }
   if (!SUPPORTED_STACKS[cfg.outcome?.stack]) {
     errors.push(`Unsupported outcome.stack: ${cfg.outcome?.stack}`);
+  }
+  if (cfg.outcome?.mode && !SUPPORTED_DELIVERY_MODES.includes(cfg.outcome.mode)) {
+    errors.push(`Unsupported outcome.mode: ${cfg.outcome.mode}`);
+  }
+  if (cfg.deployment?.target && !SUPPORTED_DEPLOY_TARGETS.includes(cfg.deployment.target)) {
+    errors.push(`Unsupported deployment.target: ${cfg.deployment.target}`);
   }
   for (const [agentName, agentCfg] of Object.entries(cfg.agents ?? {})) {
     if (agentCfg?.harness && !HARNESSES[agentCfg.harness]) {

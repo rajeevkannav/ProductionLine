@@ -22,13 +22,19 @@ flowchart LR
 
 | Skill | File | Core Contract Enforced |
 | :--- | :--- | :--- |
-| **`issue-stack-router`** | [`issue-stack-router/SKILL.md`](issue-stack-router/SKILL.md) | Resolves stack (`react19-ts-vite`, `vue3-ts-vite`, `svelte5-ts-vite`, `angular-ts`, `solid-ts-vite`), applies `stack:<id>`, and stamps issue metadata. |
+| **`issue-stack-router`** | [`issue-stack-router/SKILL.md`](issue-stack-router/SKILL.md) | Resolves stack (`react19-ts-vite`, `vue3-ts-vite`, `svelte5-ts-vite`, `angular-ts`, `solid-ts-vite`, `rails8-pg-hotwire`, `android-hotwire-native`, `ios-hotwire-native`), applies `stack:<id>`, and stamps issue metadata. |
 | **`wcag-reflow-a11y`** | [`wcag-reflow-a11y/SKILL.md`](wcag-reflow-a11y/SKILL.md) | Zero horizontal scroll at `320px` / 400% zoom, full keyboard navigation, focus restoration, `aria-live`, `prefers-reduced-motion`, `forced-colors`. |
 | **`ultra-modern-web-css`** | [`ultra-modern-web-css/SKILL.md`](ultra-modern-web-css/SKILL.md) | `@container`, `:has()`, CSS Subgrid, `@layer`, `OKLCH`, `light-dark()`, `startViewTransition()`, native `popover` + Anchor Positioning. |
 | **`local-first-resilience`** | [`local-first-resilience/SKILL.md`](local-first-resilience/SKILL.md) | Versioned IndexedDB persistence, `BroadcastChannel` cross-tab sync, Undo/Redo stack, validated JSON import/export, offline PWA. |
 | **`security-hardening`** | [`security-hardening/SKILL.md`](security-hardening/SKILL.md) | No `eval`/`innerHTML`/`v-html`, prototype-pollution-safe JSON parsing, CSP readiness, zero secrets in repo, immutable CI boundary. |
 | **`playwright-a11y-reflow-gate`** | [`playwright-a11y-reflow-gate/SKILL.md`](playwright-a11y-reflow-gate/SKILL.md) | Verifies `scrollWidth <= innerWidth` at `320x568`, keyboard-only CRUD, multi-tab sync, and zero `@axe-core/playwright` violations. |
 | **`evidence-first-reporting`** | [`evidence-first-reporting/SKILL.md`](evidence-first-reporting/SKILL.md) | Requires exact commands, exit codes, and observed metrics; missing checks must be marked `NOT RUN`. |
+| **`rails-multi-tenant-security`** | [`rails-multi-tenant-security/SKILL.md`](rails-multi-tenant-security/SKILL.md) | Rails 8 auth, `Current.account` tenant scoping (IDOR prevention), sudo mode, Solid Stack, Minitest coverage, Brakeman hygiene. |
+| **`quantumblack-rails-ui`** | [`quantumblack-rails-ui/SKILL.md`](quantumblack-rails-ui/SKILL.md) | QuantumBlack OKLCH dual-theme tokens, Inter/JetBrains Mono, Tailwind CSS v4, Turbo/Stimulus across ERB views. |
+| **`render-free-tier-ops`** | [`render-free-tier-ops/SKILL.md`](render-free-tier-ops/SKILL.md) | `render.yaml` Blueprint, `bin/render-build.sh`, `/up` health check, Solid* on Postgres, TLS proxy headers, blocked-SMTP handling. |
+| **`mckinsey-light-rails-ui`** | [`mckinsey-light-rails-ui/SKILL.md`](mckinsey-light-rails-ui/SKILL.md) | Light-only, McKinsey-inspired editorial UI for Rails views: deep-blue ink, electric-blue actions, serif headlines, hairline rules, square corners, 320px reflow; no brand assets. |
+| **`railway-neon-free-tier-ops`** | [`railway-neon-free-tier-ops/SKILL.md`](railway-neon-free-tier-ops/SKILL.md) | `railway.toml` + `rails new` Dockerfile, Neon single `DATABASE_URL` for Solid*, `/up` health check, no polling so the service and database sleep (never billable). |
+| **`hotwire-native-mobile`** | [`hotwire-native-mobile/SKILL.md`](hotwire-native-mobile/SKILL.md) | Hotwire Native Android (Gradle `.apk`) and iOS (SwiftPM/Xcode) path configuration and Bearer-token session sync with the Rails backend. |
 
 ---
 

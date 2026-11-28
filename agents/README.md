@@ -1,6 +1,6 @@
 # ProductionLine (`mogra`) Agents Guide
 
-`mogra` splits software delivery across **six single-purpose agents** defined in [`registry.yaml`](registry.yaml). Splitting Builder, Verifier, and Security roles prevents the **"grading your own homework"** failure mode.
+`mogra` splits software delivery across **eight single-purpose agents** defined in [`registry.yaml`](registry.yaml). Splitting Builder, Verifier, and Security roles prevents the **"grading your own homework"** failure mode.
 
 ---
 
@@ -37,8 +37,10 @@ sequenceDiagram
 | **`discovery-ideator`** | `discovery` | `issue-stack-router`, `wcag-reflow-a11y`, `ultra-modern-web-css` | Issue comments only |
 | **`triage-architect`** | `spec` | `issue-stack-router`, `wcag-reflow-a11y`, `ultra-modern-web-css`, `local-first-resilience`, `security-hardening` | Issue labels/body/spec |
 | **`frontend-builder`** | `build` | `wcag-reflow-a11y`, `ultra-modern-web-css`, `local-first-resilience`, `security-hardening` | App code & unit tests (no CI/config edits) |
+| **`rails-fullstack-builder`** | `build` | `rails-multi-tenant-security`, `wcag-reflow-a11y`, `security-hardening`, plus the UI skill (`quantumblack-rails-ui` or `mckinsey-light-rails-ui`) and host skill (`render-free-tier-ops` or `railway-neon-free-tier-ops`) from `outcome.capabilities` | App code & Minitest (no CI/config edits) |
+| **`mobile-native-builder`** | `build` | `hotwire-native-mobile`, `security-hardening` | `clients/android`, `clients/ios` (no CI/config edits) |
 | **`qa-reflow-verifier`** | `verify` | `playwright-a11y-reflow-gate`, `evidence-first-reporting` | Verification artifacts & checks |
-| **`security-auditor`** | `security` | `security-hardening`, `evidence-first-reporting` | SBOM & security reports |
+| **`security-auditor`** | `security` | `security-hardening`, `rails-multi-tenant-security`, `evidence-first-reporting` | SBOM & security reports |
 | **`pr-curator`** | `review-merge` | `evidence-first-reporting`, `issue-stack-router` | PR Evidence Ledger & release status |
 
 ---

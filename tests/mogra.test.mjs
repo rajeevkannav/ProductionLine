@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -10,20 +10,33 @@ import { formatEvidenceLedger } from '../src/evidence.mjs';
 import { collectStaticIssues, CROSS_STACK_UI, writeGeneratedFiles, writeRunMetrics } from '../src/free-tier-builder.mjs';
 import { resolveAgentPlan } from '../src/harness-runner.mjs';
 import { buildIssueUpdate, resolveIssueStack } from '../src/issue-router.mjs';
+import { countMinitestRuns, mergeGemfile, missingTestChanges, parseGenerators, summarizeFailure, withoutLockfiles } from '../src/incremental-builder.mjs';
 import { generateShowcasePortal } from '../src/pages-portal.mjs';
+import { applyTheme, injectThemeLink, THEME_SOURCE } from '../src/pages-theme.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('loads convention-first defaults with HITL disabled, security gates on, and 5 stacks', () => {
+test('loads convention-first defaults with HITL disabled, security gates on, and 8 supported stacks', () => {
   const cfg = loadConfig({ controlPlaneDir: ROOT });
   assert.equal(cfg.human_in_the_loop.enabled, false);
   assert.equal(cfg.runtime.harness, 'gemini-cli');
   assert.equal(cfg.outcome.stack, 'react19-ts-vite');
+  assert.equal(cfg.outcome.mode, 'greenfield-stack');
+  assert.equal(cfg.deployment.target, 'github-pages');
   assert.equal(cfg.gates.protected_paths_enforced, true);
   assert.equal(cfg.gates.secret_scan_required, true);
   assert.deepEqual(
     Object.keys(SUPPORTED_STACKS),
-    ['react19-ts-vite', 'vue3-ts-vite', 'svelte5-ts-vite', 'angular-ts', 'solid-ts-vite'],
+    [
+      'react19-ts-vite',
+      'vue3-ts-vite',
+      'svelte5-ts-vite',
+      'angular-ts',
+      'solid-ts-vite',
+      'rails8-pg-hotwire',
+      'android-hotwire-native',
+      'ios-hotwire-native',
+    ],
   );
 });
 
@@ -64,9 +77,10 @@ test('rejects invalid stack names during config validation', () => {
   }
 });
 
-test('issue router resolves all 5 TodoMVC+ stacks and updates issue metadata idempotently', () => {
+test('issue router resolves all TodoMVC+ stacks and updates issue metadata idempotently', () => {
   const cfg = loadConfig({ controlPlaneDir: ROOT });
-  for (const stackId of Object.keys(SUPPORTED_STACKS)) {
+  const frontendStacks = ['react19-ts-vite', 'vue3-ts-vite', 'svelte5-ts-vite', 'angular-ts', 'solid-ts-vite'];
+  for (const stackId of frontendStacks) {
     const resolved = resolveIssueStack({
       body: `### TodoMVC+ Stack\n\n${stackId}\n\n### Goal\nBuild TodoMVC+`,
       defaultStack: cfg.outcome.stack,
@@ -201,12 +215,409 @@ test('showcase portal renders QuantumBlack UI, GitHub timeline, measured & pre-t
   }
 });
 
-test('react19-ts-vite CSS-only QuantumBlack light theme keeps Tailwind v4 and safe light tokens', () => {
-  const css = readFileSync(join(ROOT, 'src', 'themes', 'react19-qb-light.css'), 'utf8');
-  assert.match(css, /@import "tailwindcss";/);
+test('shared TodoMVC+ theme is light-only, unlayered and framework-neutral', () => {
+  const css = readFileSync(THEME_SOURCE, 'utf8');
   assert.match(css, /color-scheme:\s*light;/);
   assert.doesNotMatch(css, /prefers-color-scheme:\s*dark/);
+  assert.doesNotMatch(css, /^\s*@(import|layer)\b/m,'unlayered rules must beat each stack\'s own layered styles');
   assert.match(css, /overflow-wrap:\s*anywhere;/);
+  assert.match(css, /prefers-reduced-motion/);
+  assert.match(css, /forced-colors/);
+});
+
+test('pages theme links the shared stylesheet into every built stack once', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'mogra-theme-'));
+  try {
+    for (const stack of ['react19-ts-vite', 'angular-ts']) {
+      mkdirSync(join(tmp, stack));
+      writeFileSync(join(tmp, stack, 'index.html'), '<html><head><title>x</title></head><body></body></html>');
+    }
+    const { href, themed } = applyTheme({ pagesDir: tmp, rootBase: '/TodoMVC-Plus', stacks: ['react19-ts-vite', 'angular-ts', 'vue3-ts-vite'] });
+    assert.deepEqual(themed, ['react19-ts-vite', 'angular-ts'], 'stacks without a build are skipped');
+    assert.match(href, /^\/TodoMVC-Plus\/_mogra\/todomvc-theme\.css\?v=[0-9a-f]{10}$/);
+    assert.equal(readFileSync(join(tmp, '_mogra', 'todomvc-theme.css'), 'utf8'), readFileSync(THEME_SOURCE, 'utf8'));
+    const html = readFileSync(join(tmp, 'angular-ts', 'index.html'), 'utf8');
+    assert.ok(html.includes(`<link rel="stylesheet" href="${href}" data-mogra-theme>\n</head>`), html);
+    applyTheme({ pagesDir: tmp, rootBase: '/TodoMVC-Plus/', stacks: ['angular-ts'] });
+    assert.equal(readFileSync(join(tmp, 'angular-ts', 'index.html'), 'utf8').match(/data-mogra-theme/g).length, 1);
+    assert.throws(() => applyTheme({ pagesDir: tmp, stacks: ['../etc'] }), /Invalid stack name/);
+    // A stack on the cross-stack UI contract keeps its own styles.css (and dark mode).
+    mkdirSync(join(tmp, 'vue3-ts-vite', 'assets'), { recursive: true });
+    writeFileSync(join(tmp, 'vue3-ts-vite', 'index.html'), '<html><head></head><body></body></html>');
+    writeFileSync(join(tmp, 'vue3-ts-vite', 'assets', 'index-abc.js'), 'h("main",{class:"todoapp","aria-labelledby":"app-title"})');
+    const contract = applyTheme({ pagesDir: tmp, rootBase: '/', stacks: ['vue3-ts-vite'] });
+    assert.deepEqual(contract.skipped, ['vue3-ts-vite']);
+    assert.doesNotMatch(readFileSync(join(tmp, 'vue3-ts-vite', 'index.html'), 'utf8'), /data-mogra-theme/);
+    assert.throws(() => injectThemeLink('<html><body></body></html>', '/x.css'), /no <\/head>/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /src\/pages-theme\.mjs/);
+  assert.doesNotMatch(workflow, /react19-qb-light/);
+});
+
+test('supports Rails 8 + Render + Hotwire Native mobile incremental-feature spoke configuration', () => {
+  const spoke = mkdtempSync(join(tmpdir(), 'mogra-jumpstart-'));
+  try {
+    writeFileSync(
+      join(spoke, '.mogra.yaml'),
+      [
+        'version: 1',
+        'outcome:',
+        '  blueprint: jumpstart-pro-plus',
+        '  mode: incremental-feature',
+        '  stack: rails8-pg-hotwire',
+        '  capabilities:',
+        '    - rails-multi-tenant-security',
+        '    - quantumblack-rails-ui',
+        '    - render-free-tier-ops',
+        'deployment:',
+        '  target: render',
+        '  render:',
+        '    region: oregon',
+        '    health_path: /up',
+      ].join('\n'),
+    );
+    const cfg = loadConfig({ controlPlaneDir: ROOT, spokeDir: spoke });
+    assert.equal(cfg.outcome.blueprint, 'jumpstart-pro-plus');
+    assert.equal(cfg.outcome.mode, 'incremental-feature');
+    assert.equal(cfg.outcome.stack, 'rails8-pg-hotwire');
+    assert.equal(cfg.deployment.target, 'render');
+    assert.equal(cfg.deployment.render.region, 'oregon');
+    assert.deepEqual(cfg.outcome.capabilities, [
+      'rails-multi-tenant-security',
+      'quantumblack-rails-ui',
+      'render-free-tier-ops',
+    ]);
+
+    const railsPlan = resolveAgentPlan({ config: cfg, controlPlaneDir: ROOT });
+    assert.equal(railsPlan.agent, 'rails-fullstack-builder');
+    assert.equal(railsPlan.stackProfile.layout, 'repo-root');
+    assert.equal(railsPlan.stackProfile.verifyProfile, 'rails-pg');
+    assert.ok(railsPlan.skills.includes('rails-multi-tenant-security'));
+    assert.ok(railsPlan.skillPaths.some((p) => p.endsWith('render-free-tier-ops/SKILL.md')));
+
+    const androidIssue = buildIssueUpdate({
+      title: 'feat(android): scaffold Hotwire Native app',
+      body: 'Build Android client',
+      labels: ['enhancement'],
+      config: cfg,
+    });
+    assert.equal(androidIssue.stack, 'android-hotwire-native');
+    assert.equal(androidIssue.title, 'feat(android): scaffold Hotwire Native app');
+    assert.equal(androidIssue.stackProfile.subpath, 'clients/android');
+    assert.equal(androidIssue.deliveryMode, 'incremental-feature');
+    assert.equal(androidIssue.deployTarget, 'render');
+  } finally {
+    rmSync(spoke, { recursive: true, force: true });
+  }
+});
+
+test('incremental builder rejects empty test runs and model-written lockfiles', () => {
+  assert.equal(countMinitestRuns('Finished in 0.1s.\n3 runs, 7 assertions, 0 failures, 0 errors, 0 skips'), 3);
+  assert.equal(countMinitestRuns('1 run, 1 assertion, 0 failures'), 1);
+  assert.equal(countMinitestRuns('0 runs, 0 assertions, 0 failures'), 0);
+  assert.equal(countMinitestRuns('Usage:\n  rails new APP_PATH [options]'), 0);
+
+  const kept = withoutLockfiles({
+    Gemfile: 'source "https://rubygems.org"',
+    'Gemfile.lock': 'GEM',
+    'yarn.lock': '#',
+    'clients/android/package-lock.json': '{}',
+    'app/models/user.rb': 'class User; end',
+    'db/schema.rb': 'ActiveRecord::Schema',
+    '.bundle/config': 'BUNDLE_FROZEN: "false"',
+    'db/migrate/20250101000000_create_solid_tables.rb': 'class CreateSolidTables',
+    'db/migrate/20260101000000_create_accounts.rb': 'class CreateAccounts',
+  });
+  assert.deepEqual(Object.keys(kept).sort(), [
+    'Gemfile',
+    'app/models/user.rb',
+    'db/migrate/20260101000000_create_accounts.rb',
+  ]);
+});
+
+test('failure summaries keep the error message and drop gem backtraces', () => {
+  const frames = Array.from({ length: 400 }, (_, i) => `\tfrom /opt/ruby/lib/ruby/gems/3.4.0/gems/minitest-6.1.0/lib/minitest.rb:${i}:in 'x'`);
+  const raw = ["test/foo_test.rb:2:in 'require': cannot load such file -- minitest/mock (LoadError)", ...frames, 'Command failed: bundle exec rails test'].join('\n');
+  const out = summarizeFailure(raw);
+  assert.match(out, /cannot load such file -- minitest\/mock/);
+  assert.match(out, /Command failed: bundle exec rails test/);
+  assert.ok(out.split('\n').filter((l) => l.includes('/gems/')).length <= 3);
+  const long = summarizeFailure(`HEAD-ERROR\n${'x'.repeat(20000)}\nTAIL`, 1000);
+  assert.ok(long.length < 1100);
+  assert.match(long, /^HEAD-ERROR/);
+  assert.match(long, /TAIL$/);
+});
+
+test('generated scripts are written executable', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mogra-exec-'));
+  try {
+    writeGeneratedFiles(dir, {
+      'bin/render-build.sh': '#!/usr/bin/env bash\nset -o errexit\n',
+      'app/models/user.rb': 'class User; end\n',
+    });
+    assert.equal(statSync(join(dir, 'bin/render-build.sh')).mode & 0o111, 0o111);
+    assert.equal(statSync(join(dir, 'app/models/user.rb')).mode & 0o111, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('supports the Railway + Neon deploy target with its host skill and no Render skill', () => {
+  const spoke = mkdtempSync(join(tmpdir(), 'mogra-railway-'));
+  try {
+    writeFileSync(
+      join(spoke, '.mogra.yaml'),
+      [
+        'version: 1',
+        'outcome:',
+        '  mode: incremental-feature',
+        '  stack: rails8-pg-hotwire',
+        '  capabilities:',
+        '    - railway-neon-free-tier-ops',
+        'deployment:',
+        '  target: railway',
+        '  railway:',
+        '    service_name: jumpstart-pro-plus',
+      ].join('\n'),
+    );
+    const cfg = loadConfig({ controlPlaneDir: ROOT, spokeDir: spoke });
+    assert.equal(cfg.deployment.target, 'railway');
+    assert.equal(cfg.deployment.railway.health_path, '/up');
+    assert.equal(cfg.deployment.railway.service_name, 'jumpstart-pro-plus');
+
+    const plan = resolveAgentPlan({ config: cfg, controlPlaneDir: ROOT });
+    assert.ok(plan.skillPaths.some((p) => p.endsWith('railway-neon-free-tier-ops/SKILL.md')));
+    assert.ok(!plan.skills.includes('render-free-tier-ops'));
+
+    const issue = buildIssueUpdate({ title: 'feat: add accounts', body: '', labels: [], config: cfg });
+    assert.equal(issue.deployTarget, 'railway');
+
+    const bootstrap = readFileSync(join(ROOT, 'scripts/bootstrap-rails.sh'), 'utf8');
+    assert.match(bootstrap, /DEPLOY_TARGET" = "railway"/);
+    assert.match(bootstrap, /sleepApplication = true/);
+  } finally {
+    rmSync(spoke, { recursive: true, force: true });
+  }
+});
+
+test('Rails bootstrap encrypts credentials with the spoke RAILS_MASTER_KEY and never keeps it', () => {
+  const bootstrap = readFileSync(join(ROOT, 'scripts/bootstrap-rails.sh'), 'utf8');
+  assert.match(bootstrap, /RAILS_MASTER_KEY secret is required/);
+  assert.match(bootstrap, /\^\[0-9a-f\]\{32\}\$/);
+  assert.ok(bootstrap.indexOf('> config/master.key') < bootstrap.indexOf('rails new .'));
+  assert.match(bootstrap, /rm -f config\/master\.key/);
+
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /RAILS_MASTER_KEY:\n\s+required: false/);
+  assert.match(workflow, /unset MOGRA_RAILS_MASTER_KEY/);
+  assert.ok(workflow.indexOf('unset MOGRA_RAILS_MASTER_KEY') < workflow.indexOf('run-agent.sh spoke'));
+  assert.match(workflow, /rm -f config\/master\.key config\/credentials\/\*\.key/);
+});
+
+test('model Gemfile edits can only add gems, never drop gems or re-pin Rails', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mogra-gemfile-'));
+  try {
+    writeFileSync(join(dir, 'Gemfile'), 'source "https://rubygems.org"\ngem "rails", "~> 8.1.4"\ngem "pg"\ngem "puma"\n');
+    const out = mergeGemfile({ Gemfile: 'gem "rails", "~> 8.0.0"\ngem "bcrypt", "~> 3.1.7"\n', 'app/a.rb': 'x' }, dir);
+    assert.match(out.Gemfile, /gem "rails", "~> 8\.1\.4"/);
+    assert.doesNotMatch(out.Gemfile, /8\.0\.0/);
+    assert.match(out.Gemfile, /gem "puma"/);
+    assert.match(out.Gemfile, /gem "bcrypt", "~> 3\.1\.7"/);
+    assert.equal(out['app/a.rb'], 'x');
+    const unchanged = mergeGemfile({ Gemfile: 'gem "pg"\n' }, dir);
+    assert.equal(unchanged.Gemfile, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('application changes without test changes are rejected', () => {
+  assert.equal(missingTestChanges(['app/models/user.rb', 'config/routes.rb']), true);
+  assert.equal(missingTestChanges(['app/models/user.rb', 'test/models/user_test.rb']), false);
+  assert.equal(missingTestChanges(['Gemfile', 'README.md']), false);
+  assert.equal(missingTestChanges(['app/views/sessions/new.html.erb', 'config/environments/production.rb']), false);
+  assert.equal(missingTestChanges(['app/assets/stylesheets/application.tailwind.css', 'app/helpers/application_helper.rb']), false);
+});
+
+test('Rails route check script ships with the control plane', () => {
+  const script = readFileSync(join(ROOT, 'scripts/rails-route-check.rb'), 'utf8');
+  assert.match(script, /constantize/);
+  assert.match(script, /template_exists\?/);
+  assert.match(readFileSync(join(ROOT, 'src/incremental-builder.mjs'), 'utf8'), /rails runner/);
+});
+
+test('issue Generators section is parsed against an allowlist', () => {
+  const spec = '### Outcome\nx\n\n### Generators\n\n```text\nbin/rails generate authentication --force\n- `rails g model Project name:string! account:references`\n```\n\n## Skills\nignored';
+  assert.deepEqual(parseGenerators(spec), [
+    ['authentication', '--force'],
+    ['model', 'Project', 'name:string!', 'account:references'],
+  ]);
+  assert.deepEqual(parseGenerators('### Generators\n\n_No response_\n\n### Notes'), []);
+  assert.deepEqual(parseGenerators('### Outcome\nno generators'), []);
+  assert.throws(() => parseGenerators('### Generators\nbin/rails generate scaffold Post'), /not allowed/);
+  assert.throws(() => parseGenerators('### Generators\nbin/rails generate model Post; rm -rf /'), /not allowed/);
+  assert.throws(() => parseGenerators('### Generators\nbin/rails db:drop'), /unsupported line/);
+});
+
+test('model edits to generator-created files are ignored', async () => {
+  const { withoutLockedFiles } = await import('../src/incremental-builder.mjs');
+  const out = withoutLockedFiles(
+    { 'app/controllers/sessions_controller.rb': 'x', 'app/controllers/registrations_controller.rb': 'y' },
+    new Set(['app/controllers/sessions_controller.rb']),
+  );
+  assert.deepEqual(Object.keys(out), ['app/controllers/registrations_controller.rb']);
+});
+
+test('sub-issue chains: queued and epic issues are skipped, and the deploy job runs the chain', () => {
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /!contains\(github\.event\.issue\.labels\.\*\.name, 'mogra:epic'\)/);
+  assert.match(workflow, /github\.event\.action == 'opened' && contains\(github\.event\.issue\.labels\.\*\.name, 'mogra:queued'\)/);
+  assert.match(workflow, /node \.mogra-control-plane\/src\/sub-issue-chain\.mjs --repo "\$REPO" --issue "\$ISSUE_NUMBER"/);
+  assert.match(workflow, /GH_TOKEN: \$\{\{ secrets\.MOGRA_BOT_TOKEN \}\}\n\s+REPO: \$\{\{ github\.repository \}\}\n\s+ISSUE_NUMBER/);
+});
+
+test('sub-issue chain walks roadmap -> milestone -> issue, closing finished milestones', async () => {
+  const { planNext } = await import('../src/sub-issue-chain.mjs');
+  const epic = [{ name: 'mogra:epic' }];
+  const issues = {
+    1: { number: 1, state: 'open', labels: epic }, // roadmap
+    14: { number: 14, state: 'open', labels: epic, parent: 1 }, // M1
+    20: { number: 20, state: 'open', labels: epic, parent: 1 }, // M2
+    21: { number: 21, state: 'open', labels: epic, parent: 1 }, // M3 (no sub-issues yet)
+    13: { number: 13, state: 'open', labels: [], parent: 14 },
+    15: { number: 15, state: 'open', labels: [], parent: 14 },
+    30: { number: 30, state: 'open', labels: [], parent: 20 },
+  };
+  const api = {
+    parent: async (n) => (issues[n]?.parent ? issues[issues[n].parent] : null),
+    subIssues: async (n) => Object.values(issues).filter((i) => i.parent === n).sort((a, b) => a.number - b.number),
+  };
+  // Within a milestone: next sibling.
+  assert.deepEqual(await planNext(13, api), { close: [], next: issues[15], paused: null });
+  // Last issue of M1: close M1 and descend into M2's first sub-issue.
+  issues[13].state = 'closed';
+  assert.deepEqual(await planNext(15, api), { close: [{ number: 14, after: 15 }], next: issues[30], paused: null });
+  // Last issue of M2: close M2 and pause at M3 (an epic without sub-issues).
+  issues[14].state = 'closed';
+  issues[15].state = 'closed';
+  assert.deepEqual(await planNext(30, api), { close: [{ number: 20, after: 30 }], next: null, paused: issues[21] });
+  // An issue without a parent chains nothing.
+  assert.deepEqual(await planNext(99, api), { close: [], next: null, paused: null });
+});
+
+test('Rails production smoke check runs in the builder and the verify job', () => {
+  const script = readFileSync(join(ROOT, 'scripts/rails-production-smoke.rb'), 'utf8');
+  assert.match(script, /delivery_method == :smtp/);
+  assert.match(script, /status\.to_i >= 500/);
+  assert.match(readFileSync(join(ROOT, 'src/incremental-builder.mjs'), 'utf8'), /rails-production-smoke\.rb/);
+  assert.match(readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8'), /RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 RAILS_LOG_LEVEL=fatal bundle exec rails runner \.\.\/control-plane\/scripts\/rails-production-smoke\.rb/);
+});
+
+test('issue Files section limits which paths the model may change', async () => {
+  const { parseAllowedFiles, withinAllowedFiles } = await import('../src/incremental-builder.mjs');
+  const globs = parseAllowedFiles('### Files\n\n```text\nconfig/environments/production.rb\napp/views/*/new.html.erb\ntest/**\n```\n\n## Skills');
+  assert.deepEqual(globs, ['config/environments/production.rb', 'app/views/*/new.html.erb', 'test/**']);
+  const kept = withinAllowedFiles(
+    {
+      'config/environments/production.rb': 'a',
+      'app/views/registrations/new.html.erb': 'b',
+      'app/views/registrations/edit.html.erb': 'c',
+      'app/controllers/concerns/authentication.rb': 'd',
+      'test/integration/sign_up_test.rb': 'e',
+    },
+    globs,
+  );
+  assert.deepEqual(Object.keys(kept).sort(), ['app/views/registrations/new.html.erb', 'config/environments/production.rb', 'test/integration/sign_up_test.rb']);
+  assert.equal(parseAllowedFiles('### Outcome\nno restriction'), null);
+  assert.deepEqual(Object.keys(withinAllowedFiles({ 'a.rb': 1 }, null)), ['a.rb']);
+});
+
+test('verify job reviews the UI: screenshots signed out and in, 320px reflow, PR summary', () => {
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /name: UI review \(screenshots signed out and in, 320px reflow\)/);
+  assert.match(workflow, /scripts\/ui-review\.mjs --upstream http:\/\/127\.0\.0\.1:3999/);
+  assert.match(workflow, /name: ui-review/);
+  const script = readFileSync(join(ROOT, 'scripts/ui-review.mjs'), 'utf8');
+  assert.match(script, /mobile-320/);
+  assert.match(script, /x-forwarded-proto/);
+  const smoke = readFileSync(join(ROOT, 'scripts/rails-production-smoke.rb'), 'utf8');
+  assert.match(smoke, /references no \/assets\/\*\.css stylesheet/);
+});
+
+test('local build mode: config, chain, workflow and Claude guards', async () => {
+  const spoke = mkdtempSync(join(tmpdir(), 'mogra-local-'));
+  try {
+    writeFileSync(join(spoke, '.mogra.yaml'), ['version: 1', 'runtime:', '  build: local', '  harness: claude-code', '  model: sonnet', 'outcome:', '  stack: rails8-pg-hotwire', '  mode: incremental-feature'].join('\n'));
+    const cfg = loadConfig({ controlPlaneDir: ROOT, spokeDir: spoke });
+    assert.equal(cfg.runtime.build, 'local');
+    assert.equal(loadConfig({ controlPlaneDir: ROOT }).runtime.build, 'cloud');
+    writeFileSync(join(spoke, '.mogra.yaml'), ['version: 1', 'runtime:', '  build: laptop'].join('\n'));
+    assert.throws(() => loadConfig({ controlPlaneDir: ROOT, spokeDir: spoke }), /runtime\.build/);
+  } finally {
+    rmSync(spoke, { recursive: true, force: true });
+  }
+
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /github\.event\.label\.name == 'mogra:built'/);
+  assert.match(workflow, /github\.event\.pull_request\.user\.login == github\.repository_owner/);
+  assert.match(workflow, /needs\.intake\.outputs\.build_mode != 'local'/);
+  assert.match(workflow, /--mode "\$BUILD_MODE"/);
+
+  const { isAllowedChange, appendOnlyGemfile } = await import('../src/claude-provider.mjs');
+  const rules = { locked: new Set(['app/controllers/sessions_controller.rb']), allowedFiles: ['app/views/**'], matchesAllowed: (p) => p.startsWith('app/views/') };
+  assert.equal(isAllowedChange('.github/workflows/mogra.yml', rules), false);
+  assert.equal(isAllowedChange('.mogra.yaml', rules), false);
+  assert.equal(isAllowedChange('app/controllers/sessions_controller.rb', rules), false);
+  assert.equal(isAllowedChange('app/models/user.rb', rules), false);
+  assert.equal(isAllowedChange('app/views/pages/home.html.erb', rules), true);
+  assert.equal(isAllowedChange('Gemfile.lock', rules), true);
+  const merged = appendOnlyGemfile('gem "rails", "~> 8.1"\ngem "pg"\n', 'gem "rails", "~> 8.0"\ngem "bcrypt"\n');
+  assert.match(merged, /gem "rails", "~> 8\.1"/);
+  assert.match(merged, /gem "pg"/);
+  assert.match(merged, /gem "bcrypt"/);
+
+  const { changeTitle } = await import('../src/local-runner.mjs');
+  assert.equal(changeTitle('feat(security): add sudo mode', 17, 'rails8-pg-hotwire'), 'feat(security): add sudo mode (#17)');
+  assert.equal(changeTitle('Add sudo mode', 17, 'rails8-pg-hotwire'), 'feat(rails8-pg-hotwire): Add sudo mode (#17)');
+});
+
+test('local build mode: TodoMVC+ Node stacks stay inside stacks/<stack>/ and run the verify checks', async () => {
+  const { localBuildKind } = await import('../src/local-runner.mjs');
+  assert.equal(localBuildKind('rails8-pg-hotwire', 'incremental-feature'), 'rails');
+  assert.equal(localBuildKind('rails8-pg-hotwire', 'greenfield-stack'), null);
+  for (const stack of ['react19-ts-vite', 'vue3-ts-vite', 'svelte5-ts-vite', 'angular-ts', 'solid-ts-vite']) {
+    assert.equal(localBuildKind(stack, 'greenfield-stack'), 'node');
+  }
+  assert.equal(localBuildKind('android-hotwire-native', 'incremental-feature'), null);
+
+  const { stackScope, nodeCheckCommands } = await import('../src/incremental-builder.mjs');
+  assert.equal(stackScope('vue3-ts-vite'), 'stacks/vue3-ts-vite/');
+  assert.equal(stackScope('rails8-pg-hotwire'), '');
+  const pkg = { scripts: { typecheck: 'tsc', test: 'vitest run', 'test:e2e': 'playwright test', build: 'vite build' } };
+  const cmds = nodeCheckCommands(pkg, {});
+  for (const cmd of ['npm run typecheck', 'npm test', 'npm run test:e2e', 'npm run build', 'npm audit --omit=dev --audit-level=high']) assert.ok(cmds.includes(cmd), cmd);
+  assert.ok(!cmds.includes('npm run lint'), 'missing scripts are skipped');
+  assert.ok(cmds.indexOf('npm run test:e2e') < cmds.indexOf('npm run build'));
+  assert.ok(!nodeCheckCommands(pkg, { MOGRA_SKIP_E2E: '1' }).includes('npm run test:e2e'));
+  assert.ok(cmds.some((c) => c.includes('gitleaks detect')));
+
+  const { isAllowedChange, claudeInstructions } = await import('../src/claude-provider.mjs');
+  const scoped = { scope: 'stacks/vue3-ts-vite/' };
+  assert.equal(isAllowedChange('stacks/vue3-ts-vite/src/App.vue', scoped), true);
+  assert.equal(isAllowedChange('stacks/vue3-ts-vite/package-lock.json', scoped), true);
+  assert.equal(isAllowedChange('stacks/react19-ts-vite/src/App.tsx', scoped), false);
+  assert.equal(isAllowedChange('README.md', scoped), false);
+  assert.equal(isAllowedChange('.github/workflows/mogra.yml', scoped), false);
+  const text = claudeInstructions({ stack: 'vue3-ts-vite', scope: 'stacks/vue3-ts-vite/' });
+  assert.match(text, /npm test/);
+  assert.match(text, /cross-stack UI contract/);
+  assert.doesNotMatch(text, /Minitest|bin\/rails/);
+  const { crossStackUiPromptSection } = await import('../src/free-tier-builder.mjs');
+  assert.match(crossStackUiPromptSection(), /class="todoapp"/);
 });
 
 function writeCompliantStack(dir) {
@@ -309,8 +720,8 @@ test('cross-stack UI contract: flags skeleton, token, theme, Tailwind, and scope
   }
 });
 
-test('cross-stack UI light tokens match the react19-ts-vite QuantumBlack light theme', () => {
-  const css = readFileSync(join(ROOT, 'src', 'themes', 'react19-qb-light.css'), 'utf8');
+test('cross-stack UI light tokens match the shared TodoMVC+ deploy theme', () => {
+  const css = readFileSync(THEME_SOURCE, 'utf8');
   const pairs = {
     '--qb-canvas': '--qb-canvas',
     '--qb-surface': '--qb-surface',

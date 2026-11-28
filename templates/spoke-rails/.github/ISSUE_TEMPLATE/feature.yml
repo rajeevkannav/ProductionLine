@@ -1,0 +1,69 @@
+name: Feature (mogra)
+description: Request a feature. ProductionLine (mogra) will spec, build, verify, and deploy it to Railway.
+title: "feat(scope): "
+labels: ["mogra:intake"]
+body:
+  - type: dropdown
+    id: stack
+    attributes:
+      label: Target Stack
+      description: Rails web app (default) or a Hotwire Native client.
+      options:
+        - rails8-pg-hotwire
+        - android-hotwire-native
+        - ios-hotwire-native
+    validations:
+      required: true
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Milestone
+      options:
+        - "M0: Walking skeleton"
+        - "M1: Identity & core auth"
+        - "M2: Multi-tenancy"
+        - "M3: Roles & security extras"
+        - "M4: Billing & payments"
+        - "M5: Notifications & announcements"
+        - "M6: API v1 & integrations"
+        - "M7: Admin, ops & config"
+        - "M8: UX & polish"
+        - "Mobile"
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What should exist when this issue is done?
+    validations:
+      required: true
+  - type: textarea
+    id: generators
+    attributes:
+      label: Generators
+      description: "Optional. Rails generators mogra runs before the model, one per line (allowed: authentication, model, migration, controller, mailer, job, channel, stimulus)."
+      placeholder: |
+        bin/rails generate authentication
+        bin/rails generate model Project name:string account:references
+      render: text
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: "Optional. Paths or globs the model may change, one per line (e.g. test/**). Anything else it writes is ignored; use for small, focused fixes."
+      render: text
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      value: |
+        - [ ] Minitest unit/integration coverage for new behavior
+        - [ ] Tenant isolation: Account A cannot read or write Account B records
+        - [ ] Brakeman, bundler-audit, Gitleaks clean
+        - [ ] WCAG 2.2 AA (axe zero violations) and 320px zero-overflow on touched pages
+        - [ ] Deploys to Railway and /up returns 200
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / Out of Scope
