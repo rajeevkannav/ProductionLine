@@ -2,6 +2,11 @@
 
 All notable changes to **ProductionLine (`mogra`)** are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Locally built PRs on a GitHub Pages spoke now deploy. A `pull_request` run deploys from `refs/pull/N/merge`, which the `github-pages` environment rejects, so the whole deploy job (merge included) was refused. The PR run now merges without an environment and starts a `repository_dispatch` run on `main` (with the issue in its payload) that builds and deploys Pages, comments on the issue and advances the sub-issue chain.
+
 ## [0.2.0] - 2026-11-28
 
 ### Added
