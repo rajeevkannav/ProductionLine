@@ -591,6 +591,30 @@ test('local build mode: config, chain, workflow and Claude guards', async () => 
   assert.equal(changeTitle('Add sudo mode', 17, 'rails8-pg-hotwire'), 'feat(rails8-pg-hotwire): Add sudo mode (#17)');
 });
 
+test('local build lock: one build per issue, stale locks are taken over', async () => {
+  const { acquireLock, lockPath } = await import('../src/local-runner.mjs');
+  assert.match(lockPath('owner/repo', 26), /\.mogra\/locks\/owner__repo-26\.lock$/);
+  const tmp = mkdtempSync(join(tmpdir(), 'mogra-lock-'));
+  const path = join(tmp, 'nested', 'issue.lock');
+  try {
+    const release = acquireLock(path, 'owner/repo#26');
+    assert.equal(readFileSync(path, 'utf8').trim(), String(process.pid));
+    // Held by a live process (the parent of this test run): a second build fails fast.
+    writeFileSync(path, `${process.ppid}\n`);
+    assert.throws(() => acquireLock(path, 'owner/repo#26'), /owner\/repo#26 is already being built by process \d+/);
+    release(); // not ours any more: must not delete another build's lock
+    assert.ok(existsSync(path));
+    // Held by a process that is gone: taken over.
+    writeFileSync(path, '999999\n');
+    const again = acquireLock(path);
+    assert.equal(readFileSync(path, 'utf8').trim(), String(process.pid));
+    again();
+    assert.ok(!existsSync(path));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('local build mode: TodoMVC+ Node stacks stay inside stacks/<stack>/ and run the verify checks', async () => {
   const { localBuildKind } = await import('../src/local-runner.mjs');
   assert.equal(localBuildKind('rails8-pg-hotwire', 'incremental-feature'), 'rails');
