@@ -368,6 +368,7 @@ jobs:
 
       - name: Upload SBOM artifact
         if: hashFiles('spoke/stacks/*/sbom.cdx.json') != '' || hashFiles('spoke/sbom.cdx.json') != ''
+        continue-on-error: true # artifact storage hiccups must not fail a verified PR
         uses: actions/upload-artifact@v4
         with:
           name: sbom-${{ needs.intake.outputs.stack }}
@@ -536,6 +537,7 @@ jobs:
 
       - name: Upload UI review screenshots
         if: always()
+        continue-on-error: true # artifact storage hiccups must not fail a verified PR
         uses: actions/upload-artifact@v4
         with:
           name: ui-review
@@ -544,6 +546,7 @@ jobs:
 
       - name: Upload Rails SBOM artifacts
         if: hashFiles('spoke/sbom-*.cdx.json') != ''
+        continue-on-error: true # artifact storage hiccups must not fail a verified PR
         uses: actions/upload-artifact@v4
         with:
           name: sbom-rails-pg
@@ -596,6 +599,7 @@ jobs:
 
       - name: Upload Android Debug APK artifact
         if: hashFiles('spoke/clients/android/app/build/outputs/apk/debug/*.apk') != ''
+        continue-on-error: true # artifact storage hiccups must not fail a verified PR
         uses: actions/upload-artifact@v4
         with:
           name: jumpstart-android-debug-apk
