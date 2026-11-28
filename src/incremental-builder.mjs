@@ -120,6 +120,7 @@ export function isGeneratedPath(path = '') {
 }
 
 const ROUTE_CHECK_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'rails-route-check.rb');
+const PRODUCTION_SMOKE_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'rails-production-smoke.rb');
 const GEM_LINE = /^[ \t]*gem[ \t]+["']([^"']+)["'].*$/gm;
 
 /**
@@ -207,6 +208,12 @@ function runStackChecks(workdir, stack) {
         runCommand('bundle exec rubocop --format simple', workdir, 120_000);
       }
       runCommand(`bundle exec rails runner ${JSON.stringify(ROUTE_CHECK_SCRIPT)}`, workdir, 120_000);
+      // Production configuration is never exercised by tests: boot it and request every GET page.
+      runCommand(
+        `RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:precompile >/dev/null && RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 RAILS_LOG_LEVEL=fatal bundle exec rails runner ${JSON.stringify(PRODUCTION_SMOKE_SCRIPT)}; status=$?; RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:clobber >/dev/null 2>&1; exit $status`,
+        workdir,
+        240_000,
+      );
       runCommand('bundle exec brakeman -q --no-pager', workdir, 120_000);
       runCommand('if bundle exec bundle-audit --help >/dev/null 2>&1; then bundle exec bundle-audit check --update; fi', workdir, 120_000);
     } else if (stack === 'android-hotwire-native') {

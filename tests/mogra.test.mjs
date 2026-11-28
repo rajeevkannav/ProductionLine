@@ -470,3 +470,11 @@ test('sub-issue chain walks roadmap -> milestone -> issue, closing finished mile
   // An issue without a parent chains nothing.
   assert.deepEqual(await planNext(99, api), { close: [], next: null, paused: null });
 });
+
+test('Rails production smoke check runs in the builder and the verify job', () => {
+  const script = readFileSync(join(ROOT, 'scripts/rails-production-smoke.rb'), 'utf8');
+  assert.match(script, /delivery_method == :smtp/);
+  assert.match(script, /status\.to_i >= 500/);
+  assert.match(readFileSync(join(ROOT, 'src/incremental-builder.mjs'), 'utf8'), /rails-production-smoke\.rb/);
+  assert.match(readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8'), /RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 RAILS_LOG_LEVEL=fatal bundle exec rails runner \.\.\/control-plane\/scripts\/rails-production-smoke\.rb/);
+});

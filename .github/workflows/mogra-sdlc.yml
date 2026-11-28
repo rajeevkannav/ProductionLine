@@ -440,6 +440,8 @@ jobs:
           RUNS=$(grep -Eo '[0-9]+ runs?, [0-9]+ assertions?' /tmp/rails-test.log | tail -1 | grep -Eo '^[0-9]+' || echo 0)
           [ "${RUNS:-0}" -gt 0 ] || { echo "::error::Minitest ran 0 tests"; exit 1; }
           bundle exec rails runner ../control-plane/scripts/rails-route-check.rb
+          RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:precompile >/dev/null
+          RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 RAILS_LOG_LEVEL=fatal bundle exec rails runner ../control-plane/scripts/rails-production-smoke.rb
           if [ -f .rubocop.yml ] || [ -f bin/rubocop ]; then
             bundle exec rubocop --format simple
           fi
@@ -750,6 +752,7 @@ jobs:
                   sleep 15
                 done
                 if [ -n "$HEALTHY" ]; then
+                  echo "healthy=true" >> "$GITHUB_OUTPUT"
                   echo "status=Deployed ${SHORT}; live and healthy at ${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
                 else
                   echo "status=Deployed ${SHORT}, but ${HEALTH_PATH} did not return 200 within 2 minutes at ${RAILWAY_APP_URL}" >> "$GITHUB_OUTPUT"
@@ -785,7 +788,10 @@ jobs:
         # Sub-issue chaining (src/sub-issue-chain.mjs): start the next open leaf issue in the
         # roadmap -> milestone -> issue tree, closing finished milestone epics on the way.
         # Needs MOGRA_BOT_TOKEN: label events made with github.token do not trigger workflows.
-        if: success() && github.event.issue.number != ''
+        # Only move on when the live app is verified healthy (Railway target) or the target has no live check.
+        if: >-
+          success() && github.event.issue.number != '' &&
+          (needs.intake.outputs.deploy_target != 'railway' || steps.railway_deploy.outputs.healthy == 'true')
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.MOGRA_BOT_TOKEN }}
