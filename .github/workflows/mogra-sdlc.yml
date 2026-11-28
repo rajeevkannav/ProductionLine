@@ -460,6 +460,50 @@ jobs:
             npx -y @cyclonedx/cyclonedx-npm --output-file sbom-node.cdx.json
           fi
 
+      - name: UI review (screenshots signed out and in, 320px reflow)
+        working-directory: spoke
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/jumpstart_test
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.discover-spec-build.outputs.pr_number }}
+        run: |
+          export RAILS_ENV=production RAILS_LOG_LEVEL=warn
+          SECRET_KEY_BASE=$(openssl rand -hex 64); export SECRET_KEY_BASE
+          MOGRA_PATHS_FILE=/tmp/mogra-paths.txt bundle exec rails runner ../control-plane/scripts/rails-production-smoke.rb >/dev/null
+          UI_EMAIL="mogra-ui-review@example.com"
+          UI_PASSWORD=$(openssl rand -hex 16)
+          echo "::add-mask::${UI_PASSWORD}"
+          MOGRA_UI_EMAIL="$UI_EMAIL" MOGRA_UI_PASSWORD="$UI_PASSWORD" bundle exec rails runner '
+            begin
+              u = User.find_or_initialize_by(email_address: ENV["MOGRA_UI_EMAIL"])
+              u.password = ENV["MOGRA_UI_PASSWORD"]
+              u.email_confirmed_at = Time.current if u.respond_to?(:email_confirmed_at=)
+              u.save!
+            rescue StandardError, NameError => e
+              warn "[mogra] No review account (#{e.class}); signed-in pages are skipped."
+            end' || true
+          bundle exec rails server -p 3999 -b 127.0.0.1 >/tmp/rails-ui.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:3999/up >/dev/null 2>&1 && break; sleep 1; done
+          # Self-signed cert for the review's local HTTPS proxy (production Rails assumes TLS).
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/review-key.pem -out /tmp/review-cert.pem -days 1 -subj "/CN=localhost" 2>/dev/null
+          npm install --no-save --no-audit --no-fund --prefix ../control-plane playwright@1.49.1 >/dev/null
+          (cd ../control-plane && npx playwright install --with-deps chromium >/dev/null)
+          STATUS=0
+          node ../control-plane/scripts/ui-review.mjs --upstream http://127.0.0.1:3999 \
+            --tls-cert /tmp/review-cert.pem --tls-key /tmp/review-key.pem --paths /tmp/mogra-paths.txt \
+            --out ../ui-review --email "$UI_EMAIL" --password "$UI_PASSWORD" || STATUS=$?
+          [ -f ../ui-review/summary.md ] && { gh pr comment "$PR_NUMBER" -R "$REPO" --body-file ../ui-review/summary.md || true; }
+          exit $STATUS
+
+      - name: Upload UI review screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-review
+          path: ui-review
+          if-no-files-found: ignore
+
       - name: Upload Rails SBOM artifacts
         if: hashFiles('spoke/sbom-*.cdx.json') != ''
         uses: actions/upload-artifact@v4

@@ -20,7 +20,7 @@ agents:
   rails-fullstack-builder:
     stage: build
     goal: Incrementally implement full-stack Rails 8 + PostgreSQL + Hotwire features per GitHub Issue with Minitest coverage, multi-tenant isolation, QuantumBlack Tailwind UI, and readiness for the configured host (Render or Railway + Neon).
-    skills: [rails-multi-tenant-security, quantumblack-rails-ui, wcag-reflow-a11y, security-hardening] # host skill (render-free-tier-ops / railway-neon-free-tier-ops) comes from outcome.capabilities
+    skills: [rails-multi-tenant-security, wcag-reflow-a11y, security-hardening] # UI skill (quantumblack-rails-ui / mckinsey-light-rails-ui) and host skill (render-free-tier-ops / railway-neon-free-tier-ops) come from outcome.capabilities
 
   mobile-native-builder:
     stage: build

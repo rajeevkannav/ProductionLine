@@ -75,7 +75,7 @@ Large features run more reliably as small issues. Create a parent issue labelled
 | :--- | :--- | :--- |
 | **Agents & SDLC Loop** | [agents/README.md](agents/README.md) | Eight single-purpose SDLC agents (incl. `rails-fullstack-builder`, `mobile-native-builder`), write boundaries, and Mermaid sequence diagram. |
 | **Models & Harnesses** | [harnesses/README.md](harnesses/README.md) | `gemini-cli`, `antigravity`, `claude-code`, `codex`, `goose`, `openhands`, `aider`, and Free-Tier/Paid routing. |
-| **Capabilities & Skills** | [skills/README.md](skills/README.md) | Twelve modular `SKILL.md` contracts (`wcag-reflow-a11y`, `ultra-modern-web-css`, `security-hardening`, `rails-multi-tenant-security`, `railway-neon-free-tier-ops`, `render-free-tier-ops`, `hotwire-native-mobile`, etc.). |
+| **Capabilities & Skills** | [skills/README.md](skills/README.md) | Thirteen modular `SKILL.md` contracts (`wcag-reflow-a11y`, `ultra-modern-web-css`, `security-hardening`, `rails-multi-tenant-security`, `railway-neon-free-tier-ops`, `render-free-tier-ops`, `hotwire-native-mobile`, etc.). |
 | **Showcase Spoke (`TodoMVC+`)** | [templates/spoke/README.md](templates/spoke/README.md) | Live 5-stack showcase setup (`React 19`, `Vue 3.5`, `Svelte 5`, `Angular`, `Solid`). |
 | **Rails Spoke (Railway + Neon)** | [templates/spoke-rails/README.md](templates/spoke-rails/README.md) | Feature-per-issue Rails 8 app on Railway + Neon (or Render) with Hotwire Native clients (reference: [`JumpStart_Pro_Plus`](https://github.com/rajeevkannav/JumpStart_Pro_Plus)). |
 | **Contributing & Security** | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) | Local checks, adding skills/harnesses, and vulnerability reporting. |

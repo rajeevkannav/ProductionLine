@@ -32,6 +32,7 @@ flowchart LR
 | **`rails-multi-tenant-security`** | [`rails-multi-tenant-security/SKILL.md`](rails-multi-tenant-security/SKILL.md) | Rails 8 auth, `Current.account` tenant scoping (IDOR prevention), sudo mode, Solid Stack, Minitest coverage, Brakeman hygiene. |
 | **`quantumblack-rails-ui`** | [`quantumblack-rails-ui/SKILL.md`](quantumblack-rails-ui/SKILL.md) | QuantumBlack OKLCH dual-theme tokens, Inter/JetBrains Mono, Tailwind CSS v4, Turbo/Stimulus across ERB views. |
 | **`render-free-tier-ops`** | [`render-free-tier-ops/SKILL.md`](render-free-tier-ops/SKILL.md) | `render.yaml` Blueprint, `bin/render-build.sh`, `/up` health check, Solid* on Postgres, TLS proxy headers, blocked-SMTP handling. |
+| **`mckinsey-light-rails-ui`** | [`mckinsey-light-rails-ui/SKILL.md`](mckinsey-light-rails-ui/SKILL.md) | Light-only, McKinsey-inspired editorial UI for Rails views: deep-blue ink, electric-blue actions, serif headlines, hairline rules, square corners, 320px reflow; no brand assets. |
 | **`railway-neon-free-tier-ops`** | [`railway-neon-free-tier-ops/SKILL.md`](railway-neon-free-tier-ops/SKILL.md) | `railway.toml` + `rails new` Dockerfile, Neon single `DATABASE_URL` for Solid*, `/up` health check, no polling so the service and database sleep (never billable). |
 | **`hotwire-native-mobile`** | [`hotwire-native-mobile/SKILL.md`](hotwire-native-mobile/SKILL.md) | Hotwire Native Android (Gradle `.apk`) and iOS (SwiftPM/Xcode) path configuration and Bearer-token session sync with the Rails backend. |
 

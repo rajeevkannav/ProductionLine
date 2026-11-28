@@ -497,3 +497,15 @@ test('issue Files section limits which paths the model may change', async () => 
   assert.equal(parseAllowedFiles('### Outcome\nno restriction'), null);
   assert.deepEqual(Object.keys(withinAllowedFiles({ 'a.rb': 1 }, null)), ['a.rb']);
 });
+
+test('verify job reviews the UI: screenshots signed out and in, 320px reflow, PR summary', () => {
+  const workflow = readFileSync(join(ROOT, '.github/workflows/mogra-sdlc.yml'), 'utf8');
+  assert.match(workflow, /name: UI review \(screenshots signed out and in, 320px reflow\)/);
+  assert.match(workflow, /scripts\/ui-review\.mjs --upstream http:\/\/127\.0\.0\.1:3999/);
+  assert.match(workflow, /name: ui-review/);
+  const script = readFileSync(join(ROOT, 'scripts/ui-review.mjs'), 'utf8');
+  assert.match(script, /mobile-320/);
+  assert.match(script, /x-forwarded-proto/);
+  const smoke = readFileSync(join(ROOT, 'scripts/rails-production-smoke.rb'), 'utf8');
+  assert.match(smoke, /references no \/assets\/\*\.css stylesheet/);
+});

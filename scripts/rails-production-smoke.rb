@@ -27,8 +27,14 @@ paths = Rails.application.routes.routes.filter_map do |route|
   path = route.path.spec.to_s.sub("(.:format)", "")
   next if path.include?(":") || path.include?("*")
 
+  # Only routes with a real action (routes without one just 404 and are reported by the route check).
+  klass = "#{route.defaults[:controller].camelize}Controller".safe_constantize
+  action = route.defaults[:action].to_s
+  next unless klass && (klass.action_methods.include?(action) || klass.new.send(:template_exists?, action, klass.controller_path))
+
   path
 end.uniq
+File.write(ENV["MOGRA_PATHS_FILE"], paths.join("\n")) if ENV["MOGRA_PATHS_FILE"]
 
 session = ActionDispatch::Integration::Session.new(Rails.application)
 session.host! "localhost"
@@ -41,6 +47,20 @@ paths.each do |path|
     next
   end
   problems << "GET #{path} returned #{status} in production" if status.to_i >= 500
+end
+
+# Every stylesheet and script the home page references must be served (otherwise the app is unstyled).
+if paths.include?("/")
+  session.get("/")
+  assets = session.response.body.to_s.scan(%r{(?:href|src)="(/assets/[^"]+\.(?:css|js))"}).flatten.uniq
+  problems << "GET / references no /assets/*.css stylesheet" if assets.none? { |a| a.end_with?(".css") }
+  assets.each do |asset|
+    status = session.get(asset)
+    next if status.to_i == 200
+
+    problems << "Asset #{asset} returned #{status} in production (pages render unstyled). " \
+                "Rails 8 serves /assets itself: don't gate config.public_file_server.enabled on an env var."
+  end
 end
 
 if problems.any?
