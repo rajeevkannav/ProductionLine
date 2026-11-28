@@ -193,8 +193,10 @@ function runStackChecks(workdir, stack) {
       }
       // setup-ruby's bundler-cache freezes the bundle (deployment mode); new gems in the Gemfile must update Gemfile.lock.
       runCommand('bundle config set --local deployment false && bundle config set --local frozen false && (bundle check || bundle install --quiet)', workdir, 240_000);
-      // Fresh database each round, so earlier rounds' tables never collide with migrations.
-      runCommand('DISABLE_DATABASE_ENVIRONMENT_CHECK=1 bundle exec rails db:drop db:prepare', workdir, 120_000);
+      // Fresh database each round, built from the migrations (not db/schema.rb), so the schema
+      // is re-dumped from migrations and can never drift from them (production runs migrations).
+      // Rails 8.1 loads db/schema.rb when migrating an empty database, so remove it first.
+      runCommand('rm -f db/schema.rb && DISABLE_DATABASE_ENVIRONMENT_CHECK=1 bundle exec rails db:drop db:create db:migrate', workdir, 180_000);
       const testOutput = runCommand('bundle exec rails test', workdir, 180_000);
       if (countMinitestRuns(testOutput) === 0) {
         return { ok: false, output: `Minitest ran 0 tests; add tests covering this issue.\n${testOutput.slice(-1500)}` };
