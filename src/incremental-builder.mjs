@@ -220,7 +220,15 @@ function runStackChecks(workdir, stack) {
       );
       runCommand('bundle exec brakeman -q --no-pager', workdir, 120_000);
       // Same secret scan as the verify job, when gitleaks is installed (catches hard-coded test passwords).
-      runCommand('if command -v gitleaks >/dev/null 2>&1; then gitleaks detect --source . --no-git --redact --no-banner --exit-code 1; fi', workdir, 120_000);
+      // Scan only what would be committed (tracked + untracked, not gitignored: no log/, tmp/,
+      // node_modules/), verbosely so the model sees file and line of each finding.
+      runCommand(
+        'if command -v gitleaks >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then ' +
+          'scan=$(mktemp -d) && git ls-files -co --exclude-standard -z | rsync -a --from0 --files-from=- . "$scan"/ && ' +
+          'gitleaks detect --source "$scan" --no-git --redact --no-banner --no-color -v --exit-code 1; status=$?; rm -rf "$scan"; exit $status; fi',
+        workdir,
+        120_000,
+      );
       runCommand('if bundle exec bundle-audit --help >/dev/null 2>&1; then bundle exec bundle-audit check --update; fi', workdir, 120_000);
     } else if (stack === 'android-hotwire-native') {
       if (existsSync(join(workdir, 'gradlew'))) {
